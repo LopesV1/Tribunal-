@@ -1,0 +1,359 @@
+/* Tribunal de Justiça de Ilha Bela - núcleo do site e páginas públicas */
+(function () {
+  const C = window.TJ_CONFIG || {};
+  const TJ = (window.TJ = {});
+  TJ.configured = !!C.SUPABASE_URL && !String(C.SUPABASE_URL).startsWith('COLE');
+  const state = (TJ.state = { U: null, P: null, site: {}, pages: [] });
+  const $ = (s, r = document) => r.querySelector(s);
+  TJ.$ = $;
+
+  // ---------- utilidades ----------
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  TJ.esc = esc;
+  TJ.fmtDate = (d) => (d ? new Date(String(d).length === 10 ? d + 'T12:00:00' : d).toLocaleDateString('pt-BR') : '');
+  TJ.fmtDT = (d) => (d ? new Date(d).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '');
+  TJ.toast = (msg, err) => {
+    const t = $('#toast');
+    t.textContent = msg;
+    t.className = 'on' + (err ? ' err' : '');
+    clearTimeout(TJ._tt);
+    TJ._tt = setTimeout(() => (t.className = ''), err ? 6000 : 2800);
+  };
+  TJ.copy = async (text, okMsg) => {
+    try { await navigator.clipboard.writeText(text); }
+    catch (e) {
+      const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+    }
+    TJ.toast(okMsg || 'Copiado!');
+  };
+
+  // Markdown simples (estilo Discord): # títulos, -# texto pequeno, > citação, **negrito**, *itálico*, __sublinhado__, ||spoiler||, listas, links
+  TJ.md = function (src) {
+    const lines = esc(src || '').split('\n');
+    const out = []; let list = false;
+    const close = () => { if (list) { out.push('</ul>'); list = false; } };
+    const inl = (t) => t
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/__(.+?)__/g, '<u>$1</u>')
+      .replace(/(^|[^*])\*([^*\n]+?)\*/g, '$1<em>$2</em>')
+      .replace(/\|\|(.+?)\|\|/g, '<span class="spoiler">$1</span>')
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    for (const raw of lines) {
+      const l = raw.trimEnd(); let m;
+      if (!l.trim()) { close(); continue; }
+      if ((m = l.match(/^(#{1,3})\s+(.*)$/))) { close(); const n = m[1].length + 1; out.push(`<h${n}>${inl(m[2])}</h${n}>`); }
+      else if ((m = l.match(/^-#\s+(.*)$/))) { close(); out.push(`<p><small>${inl(m[1])}</small></p>`); }
+      else if ((m = l.match(/^&gt;\s?(.*)$/))) { close(); out.push(`<blockquote>${inl(m[1])}</blockquote>`); }
+      else if ((m = l.match(/^[-*]\s+(.*)$/))) { if (!list) { out.push('<ul>'); list = true; } out.push(`<li>${inl(m[1])}</li>`); }
+      else { close(); out.push(`<p>${inl(l)}</p>`); }
+    }
+    close();
+    return `<div class="md">${out.join('')}</div>`;
+  };
+
+  // rótulos
+  const L = (TJ.L = {
+    status: { em_andamento: ['Em andamento', 'warn'], em_julgamento: ['Em julgamento', 'warn'], sentenciado: ['Sentenciado', 'ok'], arquivado: ['Arquivado', 'gray'], suspenso: ['Suspenso', 'bad'] },
+    kind: { criminal: 'Criminal', civel: 'Cível', administrativo: 'Administrativo' },
+    side: { acusado: 'Acusado(a)', vitima: 'Vítima', testemunha: 'Testemunha', autor: 'Autor(a)', reu: 'Réu', outro: 'Outro' },
+    ev: { relatorio: 'Relatório', anuncio: 'Anúncio', video: 'Gravação / vídeo', imagem: 'Imagem', documento: 'Documento', outro: 'Outro' },
+    cat: { comunicado: 'Comunicado', edital: 'Edital', aviso: 'Aviso', resultado: 'Resultado', portaria: 'Portaria' },
+    round: { aberto: ['Inscrições abertas', 'ok'], fechado: ['Inscrições fechadas', 'gray'], em_entrevistas: ['Em entrevistas', 'warn'], encerrado: ['Encerrado', 'gray'] },
+    app: { recebida: 'Recebida', aprovada_para_entrevista: 'Aprovado p/ entrevista', entrevistada: 'Entrevistada', aprovada: 'Aprovado(a)', reprovada: 'Reprovado(a)' },
+    hear: { audiencia: 'Audiência', julgamento: 'Julgamento', sessao: 'Sessão', entrevista: 'Entrevista', outro: 'Outro' },
+    filing: { relatorio: 'Relatório', alegacao: 'Alegações', rol_testemunhas: 'Rol de testemunhas', peticao: 'Petição', outro: 'Outro' },
+  });
+  TJ.tag = (map, key) => { const v = map[key]; return v ? `<span class="tag ${v[1]}">${esc(v[0])}</span>` : `<span class="tag">${esc(key)}</span>`; };
+
+  // ---------- Supabase ----------
+  if (TJ.configured) TJ.sb = window.supabase.createClient(C.SUPABASE_URL, C.SUPABASE_ANON_KEY);
+  const sb = () => TJ.sb;
+  const emailOf = (n) => String(n || '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '') + '@membros.tjilhabela.org';
+  TJ.emailOf = emailOf;
+  TJ.can = (p) => !!(state.P && state.P.active && (state.P.role?.perms || []).some((x) => x === '*' || x === p));
+
+  async function loadSession() {
+    const { data: { session } } = await sb().auth.getSession();
+    state.U = session?.user || null; state.P = null;
+    if (state.U) {
+      const { data } = await sb().from('profiles').select('*, role:roles(*)').eq('id', state.U.id).maybeSingle();
+      state.P = data || null;
+    }
+  }
+  TJ.loadSession = loadSession;
+
+  async function loadSettings() {
+    const [s, p] = await Promise.all([
+      sb().from('settings').select('*').eq('key', 'site').maybeSingle(),
+      sb().from('pages').select('slug,title,sort,in_menu').eq('is_public', true).eq('in_menu', true).order('sort'),
+    ]);
+    state.site = Object.assign({ name: 'Tribunal de Justiça de Ilha Bela', short: 'TJ', primary: '#12284a', accent: '#c9a24b', show_stats: true }, s.data?.value || {});
+    state.pages = p.data || [];
+    const r = document.documentElement.style;
+    r.setProperty('--primary', state.site.primary); r.setProperty('--accent', state.site.accent);
+    document.title = state.site.name;
+  }
+  TJ.loadSettings = loadSettings;
+
+  // ---------- casca (topo, rodapé) ----------
+  function shell() {
+    const s = state.site;
+    const logo = s.logo_url ? `<img src="${esc(s.logo_url)}" alt="">` : `<span class="logo">⚖</span>`;
+    $('#app').innerHTML = `
+      <header class="top"><div class="wrap">
+        <a class="brand" href="#/">${logo}<span><b>${esc(s.short || s.name)}</b><small>${esc(s.subtitle || '')}</small></span></a>
+        <nav class="nav" id="nav"></nav>
+      </div></header>
+      <main id="view"></main>
+      <footer class="footer"><div class="wrap">${esc(s.footer || '')}${s.discord_url ? ` · <a style="color:var(--accent)" href="${esc(s.discord_url)}" target="_blank" rel="noopener">Discord</a>` : ''}</div></footer>`;
+  }
+  function navRender(r) {
+    const items = [['', 'Início'], ['processos', 'Processos'], ['comunicados', 'Comunicados'], ['agenda', 'Agenda'], ['selecao', 'Seleção'], ['equipe', 'Equipe']];
+    let h = items.map(([k, t]) => `<a href="#/${k}" class="${r === k ? 'on' : ''}">${t}</a>`).join('');
+    h += state.pages.map((p) => `<a href="#/p/${esc(p.slug)}">${esc(p.title)}</a>`).join('');
+    h += state.P ? `<a class="cta" href="#/painel">Painel</a><a href="#/sair">Sair</a>` : `<a class="cta" href="#/entrar">Entrar</a>`;
+    h += `<button class="iconbtn" id="theme" title="Tema claro/escuro" aria-label="Alternar tema">◐</button>`;
+    $('#nav').innerHTML = h;
+    $('#theme').onclick = () => {
+      const d = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+      document.documentElement.dataset.theme = d; try { localStorage.setItem('tj-theme', d); } catch (e) {}
+    };
+  }
+
+  // ---------- páginas públicas ----------
+  const head = (t, sub) => `<div class="pagehead"><div class="wrap"><h1>${esc(t)}</h1>${sub ? `<p class="muted" style="margin:6px 0 0">${esc(sub)}</p>` : ''}</div></div>`;
+  const empty = (t) => `<div class="empty">${esc(t)}</div>`;
+  TJ.head = head;
+
+  const pages = {};
+
+  pages[''] = async (v) => {
+    const s = state.site;
+    const nowIso = new Date().toISOString();
+    const [cs, an, hr, rd] = await Promise.all([
+      sb().from('cases').select('id,status').eq('is_public', true),
+      sb().from('announcements').select('*').eq('published', true).order('pinned', { ascending: false }).order('created_at', { ascending: false }).limit(3),
+      sb().from('hearings').select('*').eq('is_public', true).gte('starts_at', nowIso).order('starts_at').limit(4),
+      sb().from('selection_rounds').select('*').eq('is_public', true).eq('status', 'aberto'),
+    ]);
+    const cases = cs.data || [];
+    const stat = (n, t) => `<div class="card stat"><b>${n}</b><span class="muted">${t}</span></div>`;
+    v.innerHTML = `
+      <section class="hero"><div class="wrap">
+        <h1>${esc(s.hero_title || s.name)}</h1><p>${esc(s.hero_text || '')}</p>
+        <div class="btns"><a class="btn gold" href="#/processos">Consultar processos</a><a class="btn" style="background:transparent;color:#fff;border-color:rgba(255,255,255,.4)" href="#/comunicados">Ver comunicados</a></div>
+      </div></section>
+      ${(rd.data || []).length ? `<div class="wrap section" style="padding-bottom:0"><a class="card" href="#/selecao" style="border-color:var(--accent)"><b>Processo seletivo aberto:</b> ${(rd.data).map((r) => esc(r.title)).join(' · ')} — <u>inscreva-se</u></a></div>` : ''}
+      ${s.show_stats !== false ? `<div class="wrap section"><div class="grid g3">
+        ${stat(cases.length, 'processos públicos')}
+        ${stat(cases.filter((c) => c.status === 'em_andamento' || c.status === 'em_julgamento').length, 'em andamento')}
+        ${stat(cases.filter((c) => c.status === 'sentenciado').length, 'sentenciados')}
+      </div></div>` : ''}
+      <div class="wrap section"><div class="grid g2">
+        <div><h2>Últimos comunicados</h2>${(an.data || []).length ? an.data.map(annCard).join('') : empty('Nenhum comunicado ainda.')}<p><a href="#/comunicados">Ver todos →</a></p></div>
+        <div><h2>Próximas audiências</h2>${(hr.data || []).length ? hr.data.map(hearCard).join('') : empty('Nenhuma audiência marcada.')}<p><a href="#/agenda">Ver agenda →</a></p></div>
+      </div></div>`;
+  };
+
+  const annCard = (a) => `<div class="card" style="margin-bottom:12px"><div class="row spread"><span class="tag">${esc(L.cat[a.category] || a.category)}</span><span class="small muted">${TJ.fmtDate(a.created_at)}${a.pinned ? ' · 📌 fixado' : ''}</span></div><h3 style="margin-top:8px">${esc(a.title)}</h3>${TJ.md(a.body)}</div>`;
+  const hearCard = (h) => `<div class="card" style="margin-bottom:12px"><div class="row spread"><span class="tag">${esc(L.hear[h.kind] || h.kind)}</span><b>${TJ.fmtDT(h.starts_at)}</b></div><h3 style="margin-top:8px">${esc(h.title)}</h3>${h.place ? `<p class="muted small">Local: ${esc(h.place)}</p>` : ''}${h.notes ? `<p class="small">${esc(h.notes)}</p>` : ''}</div>`;
+
+  pages.processos = async (v) => {
+    const { data, error } = await sb().from('cases').select('*').eq('is_public', true).order('opened_at', { ascending: false });
+    if (error) throw error;
+    const all = data || [];
+    v.innerHTML = head('Processos', 'Consulte o andamento e as provas dos processos públicos.') + `<div class="wrap section">
+      <div class="toolbar"><input id="q" placeholder="Buscar por número, título ou nome…" aria-label="Buscar">
+      <select id="st"><option value="">Todas as situações</option>${Object.entries(L.status).map(([k, x]) => `<option value="${k}">${x[0]}</option>`).join('')}</select></div>
+      <div class="grid g2" id="list"></div></div>`;
+    const draw = () => {
+      const q = $('#q').value.toLowerCase(), st = $('#st').value;
+      const r = all.filter((c) => (!st || c.status === st) && (!q || JSON.stringify([c.number, c.title, c.summary, c.judge, c.prosecutor, c.defense]).toLowerCase().includes(q)));
+      $('#list').innerHTML = r.length ? r.map((c) => `<a class="card" href="#/processo/${c.id}"><div class="row spread"><b>${esc(c.number)}</b>${TJ.tag(L.status, c.status)}</div><h3 style="margin-top:6px">${esc(c.title)}</h3><p class="muted small">${esc((c.summary || '').slice(0, 150))}</p><p class="small muted">${esc(L.kind[c.kind] || c.kind)} · aberto em ${TJ.fmtDate(c.opened_at)}${c.stage ? ' · ' + esc(c.stage) : ''}</p></a>`).join('') : empty('Nenhum processo encontrado.');
+    };
+    $('#q').oninput = draw; $('#st').onchange = draw; draw();
+  };
+
+  pages.processo = async (v, [id]) => {
+    const { data: c, error } = await sb().from('cases').select('*').eq('id', id).eq('is_public', true).maybeSingle();
+    if (error) throw error;
+    if (!c) { v.innerHTML = head('Processo não encontrado') + `<div class="wrap section">${empty('Este processo não existe ou não é público.')}</div>`; return; }
+    const [pa, ev, pr] = await Promise.all([
+      sb().from('case_parties').select('*').eq('case_id', id).eq('is_public', true),
+      sb().from('case_events').select('*').eq('case_id', id).eq('is_public', true).order('happened_at', { ascending: false }),
+      sb().from('evidences').select('*').eq('case_id', id).eq('is_public', true).order('created_at'),
+    ]);
+    const isImg = (u) => /\.(png|jpe?g|gif|webp)(\?|$)/i.test(u || '');
+    v.innerHTML = head('Processo ' + c.number, c.title) + `<div class="wrap section"><div class="grid g2" style="align-items:start">
+      <div>
+        <div class="card"><div class="row spread"><h3 style="margin:0">Resumo</h3>${TJ.tag(L.status, c.status)}</div>
+          ${c.summary ? TJ.md(c.summary) : '<p class="muted">Sem resumo.</p>'}
+          <p class="small muted">${esc(L.kind[c.kind] || c.kind)} · aberto em ${TJ.fmtDate(c.opened_at)}${c.closed_at ? ' · encerrado em ' + TJ.fmtDate(c.closed_at) : ''}${c.stage ? '<br>Fase: ' + esc(c.stage) : ''}</p>
+          ${c.judge || c.prosecutor || c.defense ? `<p class="small">${c.judge ? '<b>Juiz(a):</b> ' + esc(c.judge) + '<br>' : ''}${c.prosecutor ? '<b>Promotoria:</b> ' + esc(c.prosecutor) + '<br>' : ''}${c.defense ? '<b>Defesa:</b> ' + esc(c.defense) : ''}</p>` : ''}
+        </div>
+        ${c.result ? `<div class="card" style="margin-top:16px;border-color:var(--accent)"><h3>Decisão / resultado</h3>${TJ.md(c.result)}</div>` : ''}
+        <div class="card" style="margin-top:16px"><h3>Partes</h3>${(pa.data || []).length ? `<ul>${pa.data.map((p) => `<li><b>${esc(p.name)}</b> — ${esc(L.side[p.side] || p.side)}${p.note ? ' <span class="muted">(' + esc(p.note) + ')</span>' : ''}</li>`).join('')}</ul>` : '<p class="muted">Nenhuma parte pública.</p>'}</div>
+      </div>
+      <div>
+        <div class="card"><h3>Andamento</h3>${(ev.data || []).length ? `<div class="timeline">${ev.data.map((e) => `<div class="ev"><time>${TJ.fmtDate(e.happened_at)}</time><b>${esc(e.title)}</b>${e.description ? TJ.md(e.description) : ''}</div>`).join('')}</div>` : '<p class="muted">Sem movimentações públicas.</p>'}</div>
+        <div class="card" style="margin-top:16px"><h3>Provas</h3>${(pr.data || []).length ? pr.data.map((p) => `<div style="margin-bottom:14px"><div class="row spread"><b>${esc(p.title)}</b><span class="tag">${esc(L.ev[p.kind] || p.kind)}</span></div>${p.description ? `<p class="small muted" style="margin:4px 0">${esc(p.description)}</p>` : ''}${p.url ? (isImg(p.url) ? `<a href="${esc(p.url)}" target="_blank" rel="noopener"><img src="${esc(p.url)}" alt="${esc(p.title)}" loading="lazy" style="border-radius:8px;border:1px solid var(--line);max-height:260px"></a>` : `<a href="${esc(p.url)}" target="_blank" rel="noopener">Abrir prova ↗</a>`) : ''}</div>`).join('') : '<p class="muted">Nenhuma prova pública.</p>'}</div>
+      </div></div><p><a href="#/processos">← Voltar aos processos</a></p></div>`;
+  };
+
+  pages.comunicados = async (v) => {
+    const { data, error } = await sb().from('announcements').select('*').eq('published', true).order('pinned', { ascending: false }).order('created_at', { ascending: false });
+    if (error) throw error;
+    v.innerHTML = head('Comunicados', 'Avisos, editais e decisões oficiais.') + `<div class="wrap section" style="max-width:800px">${(data || []).length ? data.map(annCard).join('') : empty('Nenhum comunicado publicado.')}</div>`;
+  };
+
+  pages.agenda = async (v) => {
+    const { data, error } = await sb().from('hearings').select('*').eq('is_public', true).order('starts_at');
+    if (error) throw error;
+    const now = Date.now(); const all = data || [];
+    const up = all.filter((h) => new Date(h.starts_at) >= now), past = all.filter((h) => new Date(h.starts_at) < now).reverse().slice(0, 10);
+    v.innerHTML = head('Agenda', 'Audiências, julgamentos e sessões.') + `<div class="wrap section"><div class="grid g2">
+      <div><h2>Próximas</h2>${up.length ? up.map(hearCard).join('') : empty('Nada agendado.')}</div>
+      <div><h2>Anteriores</h2>${past.length ? past.map(hearCard).join('') : empty('Sem histórico.')}</div></div></div>`;
+  };
+
+  pages.selecao = async (v) => {
+    const [r, res] = await Promise.all([
+      sb().from('selection_rounds').select('*, role:roles(label)').eq('is_public', true).order('created_at', { ascending: false }),
+      sb().from('applications_public').select('*'),
+    ]);
+    if (r.error) throw r.error;
+    const rounds = r.data || []; const approved = res.data || [];
+    v.innerHTML = head('Processo seletivo', 'Vagas abertas e resultados.') + `<div class="wrap section">${rounds.length ? rounds.map((x) => {
+      const open = x.status === 'aberto';
+      const ap = approved.filter((a) => a.round_id === x.id);
+      return `<div class="card" style="margin-bottom:18px"><div class="row spread"><h3 style="margin:0">${esc(x.title)}</h3>${TJ.tag(L.round, x.status)}</div>
+        <p class="small muted">${x.role ? 'Cargo: ' + esc(x.role.label) : ''}${x.closes_at ? ' · inscrições até ' + TJ.fmtDT(x.closes_at) : ''}</p>
+        ${x.description ? TJ.md(x.description) : ''}${x.requirements ? '<h4>Requisitos</h4>' + TJ.md(x.requirements) : ''}
+        ${ap.length ? `<h4>Aprovados</h4><p>${ap.map((a) => `<span class="tag ok">${esc(a.roblox_name)}</span>`).join(' ')}</p>` : ''}
+        ${open ? `<details style="margin-top:12px"><summary class="btn gold">Quero me inscrever</summary><form class="apply" data-round="${x.id}" style="margin-top:12px">
+          <label>Nome no Roblox *</label><input name="roblox_name" required maxlength="40">
+          <label>Usuário no Discord</label><input name="discord_user" maxlength="60">
+          <label>Experiência jurídica / no roleplay</label><textarea name="experience" maxlength="1500"></textarea>
+          <label>Por que quer fazer parte?</label><textarea name="motivation" maxlength="1500"></textarea>
+          <p><button class="btn blue">Enviar inscrição</button></p></form></details>` : ''}
+      </div>`;
+    }).join('') : empty('Nenhum processo seletivo no momento.')}</div>`;
+    v.querySelectorAll('form.apply').forEach((f) => (f.onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = Object.fromEntries(new FormData(f).entries());
+      Object.keys(fd).forEach((k) => { if (!String(fd[k]).trim()) fd[k] = null; });
+      const { error } = await sb().from('applications').insert({ ...fd, round_id: f.dataset.round });
+      if (error) return TJ.toast('Não foi possível enviar: ' + error.message, true);
+      f.innerHTML = '<p><b>Inscrição enviada!</b> Aguarde o contato da equipe.</p>';
+    }));
+  };
+
+  pages.equipe = async (v) => {
+    const { data, error } = await sb().from('profiles').select('*, role:roles(label,rank)').eq('active', true).eq('show_public', true);
+    if (error) throw error;
+    const g = {};
+    (data || []).forEach((p) => { const k = p.role?.label || p.role_key; (g[k] = g[k] || { rank: p.role?.rank || 0, m: [] }).m.push(p); });
+    const groups = Object.entries(g).sort((a, b) => b[1].rank - a[1].rank);
+    v.innerHTML = head('Equipe', 'Quem compõe o Tribunal.') + `<div class="wrap section">${groups.length ? groups.map(([k, x]) => `<h2>${esc(k)}</h2><div class="grid g3" style="margin-bottom:20px">${x.m.map((p) => `<div class="card"><b>${esc(p.display_name || p.roblox_name)}</b><div class="muted small">@${esc(p.roblox_name)}</div>${p.bio ? `<p class="small">${esc(p.bio)}</p>` : ''}</div>`).join('')}</div>`).join('') : empty('Equipe ainda não divulgada.')}</div>`;
+  };
+
+  pages.p = async (v, [slug]) => {
+    const { data, error } = await sb().from('pages').select('*').eq('slug', slug).eq('is_public', true).maybeSingle();
+    if (error) throw error;
+    v.innerHTML = data ? head(data.title) + `<div class="wrap section" style="max-width:820px"><div class="card">${TJ.md(data.body)}</div></div>` : head('Página não encontrada') + `<div class="wrap section">${empty('Esta página não existe.')}</div>`;
+  };
+
+  pages.entrar = async (v) => {
+    if (state.P) { location.hash = '#/painel'; return; }
+    v.innerHTML = `<div class="wrap"><form class="card login" id="lf"><h2>Entrar</h2>
+      <p class="muted small">Acesso restrito a membros do Tribunal. Use seu nome do Roblox e sua senha.</p>
+      <label>Nome no Roblox</label><input id="n" autocomplete="username" required>
+      <label>Senha</label><input id="p" type="password" autocomplete="current-password" required>
+      <p><button class="btn blue" style="width:100%;justify-content:center">Entrar</button></p>
+      <p class="small">Recebeu um convite? <a href="#/ativar">Ativar acesso</a></p></form></div>`;
+    $('#lf').onsubmit = async (e) => {
+      e.preventDefault();
+      try {
+        const { error } = await sb().auth.signInWithPassword({ email: emailOf($('#n').value), password: $('#p').value });
+        if (error) throw new Error('Nome do Roblox ou senha incorretos.');
+        await loadSession();
+        if (!state.P) { await sb().auth.signOut(); state.U = null; throw new Error('Conta ainda não ativada. Use "Ativar acesso" com seu convite.'); }
+        if (!state.P.active) { await sb().auth.signOut(); state.U = state.P = null; throw new Error('Esta conta está desativada.'); }
+        location.hash = '#/painel';
+      } catch (err) { TJ.toast(err.message, true); }
+    };
+  };
+
+  pages.ativar = async (v) => {
+    v.innerHTML = `<div class="wrap"><form class="card login" id="af"><h2>Ativar acesso</h2>
+      <p class="muted small">Use o código de convite que a coordenação enviou para você.</p>
+      <label>Nome no Roblox (exatamente como no convite)</label><input id="n" required>
+      <label>Código do convite</label><input id="c" required style="text-transform:uppercase">
+      <label>Crie uma senha (mínimo 8 caracteres)</label><input id="p" type="password" minlength="8" autocomplete="new-password" required>
+      <label>Repita a senha</label><input id="p2" type="password" minlength="8" autocomplete="new-password" required>
+      <p><button class="btn blue" style="width:100%;justify-content:center">Ativar</button></p>
+      <p class="small"><a href="#/entrar">Já tenho conta</a></p></form></div>`;
+    $('#af').onsubmit = async (e) => {
+      e.preventDefault();
+      const name = $('#n').value.trim(), code = $('#c').value.trim(), pass = $('#p').value;
+      try {
+        if (pass !== $('#p2').value) throw new Error('As senhas não conferem.');
+        const email = emailOf(name);
+        let { error } = await sb().auth.signUp({ email, password: pass });
+        if (error && /registered|already/i.test(error.message)) {
+          ({ error } = await sb().auth.signInWithPassword({ email, password: pass }));
+          if (error) throw new Error('Este nome já tem conta e a senha não confere.');
+        } else if (error) throw error;
+        const { data: { session } } = await sb().auth.getSession();
+        if (!session) throw new Error('O Supabase está pedindo confirmação de e-mail. Desligue "Confirm email" em Authentication > Sign In / Providers > Email.');
+        const r = await sb().rpc('redeem_invite', { p_code: code, p_roblox: name });
+        if (r.error) { await sb().auth.signOut(); throw new Error(r.error.message); }
+        await loadSession();
+        TJ.toast('Acesso ativado! Bem-vindo(a).');
+        location.hash = '#/painel';
+      } catch (err) { TJ.toast(err.message, true); }
+    };
+  };
+
+  pages.sair = async () => {
+    await sb().auth.signOut(); state.U = state.P = null; location.hash = '#/';
+  };
+
+  // ---------- roteador ----------
+  async function route() {
+    const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
+    const r = parts[0] || '';
+    navRender(r);
+    const view = $('#view');
+    view.innerHTML = '<p class="boot">Carregando…</p>';
+    window.scrollTo(0, 0);
+    try {
+      if (r === 'painel') {
+        if (!state.P) { location.hash = '#/entrar'; return; }
+        await TJ.mountPanel(view, parts.slice(1));
+      } else if (pages[r]) {
+        await pages[r](view, parts.slice(1));
+      } else {
+        view.innerHTML = head('Página não encontrada') + `<div class="wrap section">${empty('O endereço não existe. Volte ao início.')}</div>`;
+      }
+    } catch (e) {
+      console.error(e);
+      view.innerHTML = `<div class="wrap section"><div class="card"><h3>Algo deu errado</h3><p class="muted">${esc(e.message || e)}</p><p class="small">Se acabou de instalar, confira se o arquivo <code>supabase/schema.sql</code> foi executado por completo.</p></div></div>`;
+    }
+  }
+  TJ.route = route;
+
+  TJ.start = async function () {
+    try { const t = localStorage.getItem('tj-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+    if (!TJ.configured) {
+      $('#app').innerHTML = `<div class="wrap section"><div class="card" style="max-width:640px;margin:40px auto"><h2>Falta configurar o Supabase</h2><p>Abra o arquivo <code>js/config.js</code> e cole a URL e a chave <b>anon</b> do seu projeto (Supabase → Project Settings → API). O passo a passo está no <b>LEIA-ME.md</b>.</p></div></div>`;
+      return;
+    }
+    try { await loadSettings(); await loadSession(); } catch (e) { console.error(e); }
+    shell();
+    document.addEventListener('click', (e) => { const s = e.target.closest('.spoiler'); if (s) s.classList.toggle('show'); });
+    window.addEventListener('hashchange', route);
+    sb().auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') { state.U = state.P = null; } });
+    route();
+  };
+})();
