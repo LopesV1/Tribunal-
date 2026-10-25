@@ -2,7 +2,7 @@
 (function () {
   const C = window.TJ_CONFIG || {};
   const TJ = (window.TJ = {});
-  TJ.configured = !!C.SUPABASE_URL && !String(C.SUPABASE_URL).startsWith('COLE');
+  TJ.configured = /^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/i.test(String(C.SUPABASE_URL || '').trim());
   const state = (TJ.state = { U: null, P: null, site: {}, pages: [] });
   const $ = (s, r = document) => r.querySelector(s);
   TJ.$ = $;
@@ -66,7 +66,7 @@
   TJ.tag = (map, key) => { const v = map[key]; return v ? `<span class="tag ${v[1]}">${esc(v[0])}</span>` : `<span class="tag">${esc(key)}</span>`; };
 
   // ---------- Supabase ----------
-  if (TJ.configured) TJ.sb = window.supabase.createClient(C.SUPABASE_URL, C.SUPABASE_ANON_KEY);
+  if (TJ.configured) { try { TJ.sb = window.supabase.createClient(String(C.SUPABASE_URL).trim(), String(C.SUPABASE_ANON_KEY || '').trim()); } catch (e) { console.error(e); TJ.configured = false; } }
   const sb = () => TJ.sb;
   const emailOf = (n) => String(n || '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '') + '@membros.tjilhabela.org';
   TJ.emailOf = emailOf;
@@ -346,7 +346,7 @@
   TJ.start = async function () {
     try { const t = localStorage.getItem('tj-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
     if (!TJ.configured) {
-      $('#app').innerHTML = `<div class="wrap section"><div class="card" style="max-width:640px;margin:40px auto"><h2>Falta configurar o Supabase</h2><p>Abra o arquivo <code>js/config.js</code> e cole a URL e a chave <b>anon</b> do seu projeto (Supabase → Project Settings → API). O passo a passo está no <b>LEIA-ME.md</b>.</p></div></div>`;
+      $('#app').innerHTML = `<div class="wrap section"><div class="card" style="max-width:640px;margin:40px auto"><h2>Falta configurar o Supabase</h2><p>Abra o arquivo <code>config.js</code> e confira: <b>SUPABASE_URL</b> deve ser o endereço do projeto, no formato <code>https://xxxxxxxx.supabase.co</code>, e <b>SUPABASE_ANON_KEY</b> deve ser a chave (anon ou publishable). O passo a passo está no <b>LEIA-ME.md</b>.</p></div></div>`;
       return;
     }
     try { await loadSettings(); await loadSession(); } catch (e) { console.error(e); }
