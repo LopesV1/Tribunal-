@@ -11,6 +11,9 @@
     interview_schedule: ['Agenda de entrevistas', 'Ao aplicar horários na seleção (opcional)', ['titulo', 'lista']],
     member_promoted: ['Membro promovido', 'Quando o cargo de um membro sobe', ['nome', 'cargo']],
     member_dismissed: ['Membro desligado', 'Quando um membro é desligado', ['nome']],
+    ticket_new: ['Novo chamado (atendimento)', 'Quando alguém abre um chamado — enviado pelo servidor, mesmo sem ninguém logado', ['protocolo', 'categoria', 'assunto', 'nome', 'prioridade', 'texto']],
+    ticket_reply: ['Resposta do solicitante', 'Quando quem abriu o chamado responde — enviado pelo servidor', ['protocolo', 'assunto', 'nome', 'texto']],
+    ticket_closed: ['Chamado resolvido', 'Quando um chamado é marcado como resolvido — enviado pelo servidor', ['protocolo', 'assunto', 'nome']],
   };
   const fill = (tpl, vars) => String(tpl || '').replace(/\{(\w+)\}/g, (_, k) => (vars && vars[k] != null && vars[k] !== '' ? vars[k] : '—'));
   const chunk = (t, n = 1900) => { const out = []; let cur = ''; for (const line of String(t).split('\n')) { if ((cur + '\n' + line).length > n && cur) { out.push(cur); cur = ''; } if (line.length > n) { for (let i = 0; i < line.length; i += n) out.push(line.slice(i, i + n)); continue; } cur = cur ? cur + '\n' + line : line; } if (cur) out.push(cur); return out; };
@@ -22,7 +25,7 @@
     if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error(`Discord respondeu ${r.status}${t ? ': ' + t.slice(0, 120) : ''}`); }
   }
   async function log(ch, kind, content, ok) {
-    try { await sb().from('discord_log').insert({ channel_name: ch.name, kind, content: String(content).slice(0, 4000), ok, user_id: state.U?.id || null }); } catch (e) { /* ignora */ }
+    try { const r = await sb().from('discord_log').insert({ channel_name: ch.name, kind, content: String(content).slice(0, 4000), ok, user_id: state.U?.id || null }); if (r.error) TJ.toast('Enviado, mas não consegui gravar no histórico: ' + r.error.message + ' (rode o schema_v3.sql inteiro)', true); } catch (e) { /* ignora */ }
   }
   // envia texto simples (com divisão automática) ou embed para um canal
   async function sendTo(ch, o, kind) {
@@ -128,14 +131,15 @@
     const can = TJ.can('manage_site');
     const [chs, { data: rules }] = await Promise.all([sb().from('discord_channels').select('id,name,active').order('name'), sb().from('discord_rules').select('*')]);
     const byEv = Object.fromEntries((rules || []).map((r) => [r.event, r]));
-    tc.innerHTML = `<div class="card" style="margin-bottom:16px"><b>Avisos automáticos</b><p class="small muted" style="margin-bottom:0">Escolha o que o site avisa sozinho e em qual canal. Os avisos são enviados do seu navegador no momento da ação (por exemplo, ao salvar a audiência).</p></div>
+    tc.innerHTML = `<div class="card" style="margin-bottom:16px"><b>Avisos automáticos</b><p class="small muted" style="margin-bottom:0">Escolha o que o site avisa sozinho e em qual canal. Os avisos comuns são enviados do seu navegador no momento da ação (ex.: ao salvar a audiência). Os de atendimento saem direto do servidor. Use <b>Enviar teste</b> para conferir o canal.</p></div>
       ${Object.entries(EVENTS).map(([ev, [t, d, vars]]) => { const r = byEv[ev] || { enabled: false, template: '' }; return `<div class="card" data-ev="${ev}" style="margin-bottom:14px"><div class="row spread"><div><b>${t}</b><div class="small muted">${d}</div></div><label class="chk" style="margin:0"><input type="checkbox" class="en"${r.enabled ? ' checked' : ''}${can ? '' : ' disabled'}> Ativo</label></div>
         <label>Canal</label><select class="ch"${can ? '' : ' disabled'}><option value="">— escolher —</option>${(chs || []).map((c) => `<option value="${c.id}"${r.channel_id === c.id ? ' selected' : ''}>#${esc(c.name)}${c.active ? '' : ' (inativo)'}</option>`).join('')}</select>
         <label>Mensagem <span class="muted small">campos: ${vars.map((v) => `<code>{${v}}</code>`).join(' ')}</span></label><textarea class="tp" rows="4"${can ? '' : ' disabled'}>${esc(r.template || '')}</textarea>
-        ${can ? '<p class="row" style="margin-bottom:0"><button class="btn sm gold sv">Salvar</button><button class="btn sm pr">Pré-visualizar</button></p>' : ''}</div>`; }).join('')}`;
+        ${can ? '<p class="row" style="margin-bottom:0"><button class="btn sm gold sv">Salvar</button><button class="btn sm pr">Pré-visualizar</button><button class="btn sm ts">Enviar teste</button></p>' : ''}</div>`; }).join('')}`;
     tc.querySelectorAll('[data-ev]').forEach((card) => {
       const ev = card.dataset.ev; const ex = Object.fromEntries(EVENTS[ev][2].map((v) => [v, '(' + v + ')']));
       const pr = card.querySelector('.pr'); if (pr) pr.onclick = () => TJ.dlg(`<h3>Pré-visualização</h3><div class="dcpreview">${TJ.md(fill(card.querySelector('.tp').value, ex))}</div><p><button class="btn" data-close>Fechar</button></p>`);
+      const ts = card.querySelector('.ts'); if (ts) ts.onclick = async () => { const id = card.querySelector('.ch').value; if (!id) return TJ.toast('Escolha um canal primeiro.', true); const { data: ch } = await sb().from('discord_channels').select('*').eq('id', id).maybeSingle(); const err = await sendTo(ch, { content: '🧪 *Teste*\n' + fill(card.querySelector('.tp').value, ex) }, 'teste:' + ev); TJ.toast(err || 'Teste enviado!', !!err); };
       const sv = card.querySelector('.sv'); if (sv) sv.onclick = async () => {
         const row = { event: ev, enabled: card.querySelector('.en').checked, channel_id: card.querySelector('.ch').value || null, template: card.querySelector('.tp').value };
         if (row.enabled && !row.channel_id) return TJ.toast('Escolha um canal para ativar.', true);
@@ -145,8 +149,8 @@
   }
 
   async function tabHist(tc) {
-    await TJ.crud(tc, { id: 'dlog', table: 'discord_log', order: ['created_at', false], canWrite: false, noCreate: true,
+    await TJ.crud(tc, { id: 'dlog', table: 'discord_log', order: ['at', false], canWrite: false, noCreate: true,
       filters: [{ k: 'ok', label: 'Resultado', opts: [['true', 'Enviado'], ['false', 'Falhou']] }],
-      cols: [{ label: 'Quando', fmt: F.dt('created_at') }, { label: 'Canal', fmt: (r) => '#' + esc(r.channel_name || '') }, { label: 'Origem', k: 'kind' }, { label: 'Resultado', fmt: (r) => `<span class="tag ${r.ok ? 'ok' : 'bad'}">${r.ok ? 'Enviado' : 'Falhou'}</span>` }, { label: 'Mensagem', fmt: F.cut('content', 90) }] });
+      cols: [{ label: 'Quando', fmt: F.dt('at') }, { label: 'Canal', fmt: (r) => '#' + esc(r.channel_name || '') }, { label: 'Origem', k: 'kind' }, { label: 'Resultado', fmt: (r) => `<span class="tag ${r.ok ? 'ok' : 'bad'}">${r.ok ? 'Enviado' : 'Falhou'}</span>` }, { label: 'Mensagem', fmt: F.cut('content', 90) }] });
   }
 })();

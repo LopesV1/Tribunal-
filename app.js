@@ -97,7 +97,7 @@
   }
   TJ.loadSession = loadSession;
 
-  const NAV_DEFAULT = [['', 'Início'], ['processos', 'Processos'], ['comunicados', 'Comunicados'], ['agenda', 'Agenda'], ['selecao', 'Seleção'], ['equipe', 'Equipe']];
+  const NAV_DEFAULT = [['', 'Início'], ['processos', 'Processos'], ['comunicados', 'Comunicados'], ['agenda', 'Agenda'], ['selecao', 'Seleção'], ['atendimento', 'Atendimento'], ['equipe', 'Equipe']];
   TJ.navDefault = NAV_DEFAULT;
   TJ.navItems = () => {
     const cfg = Array.isArray(state.site.nav) ? state.site.nav : [];
@@ -201,6 +201,7 @@
   const empty = (t) => `<div class="empty">${esc(t)}</div>`;
   TJ.head = head;
   const pages = {};
+  TJ.pages = pages;
 
   const annCard = (a) => `<div class="card" style="margin-bottom:14px">${a.image_url ? `<img class="cover" src="${esc(a.image_url)}" alt="" loading="lazy">` : ''}<div class="row spread"><span class="tag">${esc(L.cat[a.category] || a.category)}</span><span class="small muted">${TJ.fmtDate(a.created_at)}${a.pinned ? ' · 📌 fixado' : ''}</span></div><h3 style="margin-top:8px">${esc(a.title)}</h3>${TJ.md(a.body)}</div>`;
   const hearCard = (h) => `<div class="card" style="margin-bottom:14px"><div class="row spread"><span class="tag">${esc(L.hear[h.kind] || h.kind)}</span><b>${TJ.fmtDT(h.starts_at)}</b></div><h3 style="margin-top:8px">${esc(h.title)}</h3>${h.place ? `<p class="muted small">Local: ${esc(h.place)}</p>` : ''}${h.notes ? `<p class="small">${esc(h.notes)}</p>` : ''}</div>`;

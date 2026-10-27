@@ -15,6 +15,7 @@
     manage_selection: 'Gerir processo seletivo, entrevistas e perguntas',
     manage_users: 'Gerir membros, convites e cargos',
     manage_site: 'Gerir aparência e páginas do site',
+    manage_tickets: 'Gerir a linha de atendimento (chamados, categorias, FAQ)',
     view_audit: 'Ver o histórico de alterações',
   };
 
@@ -36,6 +37,7 @@
     tasks: 'M9 6h12 M9 12h12 M9 18h12 M3 6l1 1 2-2 M3 12l1 1 2-2 M3 18l1 1 2-2',
     search: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16 M21 21l-4.3-4.3',
     menu: 'M4 6h16 M4 12h16 M4 18h16',
+    headset: 'M4 14v-2a8 8 0 0 1 16 0v2 M4 14h3v6H4z M17 14h3v6h-3z M20 20a4 4 0 0 1-4 2h-2',
     out: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4 M16 17l5-5-5-5 M21 12H9',
   };
   const icon = (n) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${IC[n] || IC.file}"/></svg>`;
@@ -522,6 +524,15 @@
         const { data } = await sb().from('applications').select('*, round:selection_rounds(title)').eq('status', 'recebida').order('created_at', { ascending: false }).limit(5);
         return `<div class="card"><h3>Candidaturas novas</h3>${(data || []).length ? data.map((x) => `<div class="item"><b>${esc(x.roblox_name)}</b> <span class="small muted">${esc(x.round?.title || '')}</span></div>`).join('') : '<p class="muted">Nenhuma candidatura nova.</p>'}<p style="margin-bottom:0"><a href="#/painel/selecao/candidatos">Ver candidatos →</a></p></div>`;
       } },
+      { id: 'tickets', title: 'Atendimento', ok: c('manage_tickets'), r: async () => {
+        const { data } = await sb().from('tickets').select('id,protocol,subject,status,priority,created_at').in('status', ['aberto', 'em_atendimento']).order('created_at').limit(60);
+        const l = (data || []).sort((a, b) => ({ urgente: 0, alta: 1, normal: 2, baixa: 3 }[a.priority] - { urgente: 0, alta: 1, normal: 2, baixa: 3 }[b.priority]) || new Date(a.created_at) - new Date(b.created_at));
+        return `<div class="card"><h3>Atendimento <span class="tag ${l.length ? 'warn' : 'ok'}">${l.length} em aberto</span></h3>${l.slice(0, 5).map((x) => `<div class="item row spread"><a href="#/painel/atendimento/ver/${x.id}"><b>${esc(x.protocol)}</b> ${esc(x.subject)}</a>${x.priority !== 'normal' ? `<span class="tag ${x.priority === 'urgente' ? 'bad' : 'warn'}">${esc(x.priority)}</span>` : ''}</div>`).join('') || '<p class="muted">Nenhum chamado em aberto.</p>'}<p style="margin-bottom:0"><a href="#/painel/atendimento/fila">Abrir fila →</a></p></div>`;
+      } },
+      { id: 'mytickets', title: 'Meus chamados', ok: c('view_internal') && !c('manage_tickets'), r: async () => {
+        const { data } = await sb().from('tickets').select('id,protocol,subject,status').eq('requester_id', state.U.id).in('status', ['aberto', 'em_atendimento', 'aguardando']).limit(5);
+        return `<div class="card"><h3>Meus chamados</h3>${(data || []).map((x) => `<div class="item"><a href="#/painel/atendimento/ver/${x.id}"><b>${esc(x.protocol)}</b> ${esc(x.subject)}</a></div>`).join('') || '<p class="muted">Nenhum chamado aberto.</p>'}<p style="margin-bottom:0"><a href="#/painel/atendimento/novo">Abrir um chamado →</a></p></div>`;
+      } },
       { id: 'audit', title: 'Últimas alterações', ok: c('view_audit'), r: async () => {
         const { data } = await sb().from('audit_log').select('*').order('at', { ascending: false }).limit(6);
         const A = { INSERT: 'Criou', UPDATE: 'Alterou', DELETE: 'Excluiu' };
@@ -641,6 +652,7 @@
       ['pecas', 'Minhas peças', 'file', c('write_filings') || c('view_all_filings'), 'Trabalho'],
       ['modelos', 'Modelos de peças', 'copy', c('view_internal'), 'Trabalho'],
       ['tarefas', 'Tarefas', 'tasks', c('view_internal'), 'Trabalho'],
+      ['atendimento', 'Atendimento', 'headset', c('view_internal'), 'Trabalho'],
       ['agenda', 'Agenda', 'calendar', c('view_internal'), 'Trabalho'],
       ['mural', 'Mural interno', 'pin', c('view_internal'), 'Trabalho'],
       ['vagas', 'Vagas internas', 'clip', c('view_internal'), 'Trabalho'],
