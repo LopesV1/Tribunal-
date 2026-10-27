@@ -28,6 +28,8 @@
     }
     TJ.toast(okMsg || 'Copiado!');
   };
+  TJ.cssUrl = (u) => esc(encodeURI(String(u || '')).replace(/'/g, '%27'));
+  TJ.tagsOf = (s) => String(s || '').split(',').map((x) => x.trim()).filter(Boolean);
   TJ.store = {
     get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
@@ -99,18 +101,20 @@
   TJ.navDefault = NAV_DEFAULT;
   TJ.navItems = () => {
     const cfg = Array.isArray(state.site.nav) ? state.site.nav : [];
-    const out = NAV_DEFAULT.map(([k, t]) => { const c = cfg.find((x) => x.k === k) || {}; return { k, label: c.label || t, show: c.show !== false }; });
+    const out = NAV_DEFAULT.map(([k, t]) => { const c = cfg.find((x) => x.k === k) || {}; return { k, label: c.label || t, show: c.show !== false, icon: c.icon || '' }; });
     cfg.forEach((c, i) => { const idx = out.findIndex((o) => o.k === c.k); if (idx >= 0) out[idx]._i = i; });
     out.sort((a, b) => (a._i ?? 99) - (b._i ?? 99));
     return out;
   };
 
-  const SITE_DEFAULTS = { name: 'Tribunal de Justiça de Ilha Bela', short: 'TJ', primary: '#12284a', accent: '#c9a24b', show_stats: true, font: 'serif', radius: 12, density: 'normal', home: {} };
+  const SITE_DEFAULTS = { name: 'Tribunal de Justiça de Ilha Bela', short: 'TJ', primary: '#12284a', accent: '#c9a24b', show_stats: true, style: 'moderno', font: 'sans', radius: 18, density: 'normal', home: {}, banners: {} };
   function applyAppearance() {
     const s = state.site, r = document.documentElement;
     r.style.setProperty('--primary', s.primary || '#12284a');
     r.style.setProperty('--accent', s.accent || '#c9a24b');
-    r.style.setProperty('--r', (Number(s.radius) >= 0 ? Number(s.radius) : 12) + 'px');
+    r.style.setProperty('--r', (Number(s.radius) >= 0 ? Number(s.radius) : 18) + 'px');
+    r.dataset.style = s.style || 'moderno';
+    const tc = document.querySelector('meta[name=theme-color]'); if (tc) tc.content = s.primary || '#12284a';
     r.dataset.density = s.density || 'normal';
     r.dataset.font = s.font || 'serif';
     const st = document.getElementById('custom-css'); if (st) st.textContent = s.custom_css || '';
@@ -123,7 +127,7 @@
   async function loadSettings() {
     const [s, p] = await Promise.all([
       sb().from('settings').select('*').eq('key', 'site').maybeSingle(),
-      sb().from('pages').select('slug,title,sort,in_menu').eq('is_public', true).eq('in_menu', true).order('sort'),
+      sb().from('pages').select('slug,title,sort,in_menu,icon').eq('is_public', true).eq('in_menu', true).order('sort'),
     ]);
     state.site = Object.assign({}, SITE_DEFAULTS, s.data?.value || {});
     state.pages = p.data || [];
@@ -135,7 +139,9 @@
   function shell() {
     const s = state.site;
     const logo = s.logo_url ? `<img src="${esc(s.logo_url)}" alt="">` : `<span class="logo">⚖</span>`;
-    $('#app').innerHTML = `
+    const tb = s.top_banner || {};
+    const banner = tb.on && tb.text ? `<div class="topbanner" style="${tb.color ? 'background:' + esc(tb.color) + ';' : ''}">${tb.link ? `<a href="${esc(tb.link)}">${esc(tb.text)}</a>` : esc(tb.text)}</div>` : '';
+    $('#app').innerHTML = `${banner}
       <header class="top"><div class="wrap">
         <a class="brand" href="#/">${logo}<span><b>${esc(s.short || s.name)}</b><small>${esc(s.subtitle || '')}</small></span></a>
         <button class="iconbtn burger" id="burger" aria-label="Abrir menu">☰</button>
@@ -146,8 +152,8 @@
     $('#burger').onclick = () => $('#nav').classList.toggle('open');
   }
   function navRender(r) {
-    let h = TJ.navItems().filter((i) => i.show).map((i) => `<a href="#/${i.k}" class="${r === i.k ? 'on' : ''}">${esc(i.label)}</a>`).join('');
-    h += state.pages.map((p) => `<a href="#/p/${esc(p.slug)}">${esc(p.title)}</a>`).join('');
+    let h = TJ.navItems().filter((i) => i.show).map((i) => `<a href="#/${i.k}" class="${r === i.k ? 'on' : ''}">${i.icon ? esc(i.icon) + ' ' : ''}${esc(i.label)}</a>`).join('');
+    h += state.pages.map((p) => `<a href="#/p/${esc(p.slug)}">${p.icon ? esc(p.icon) + ' ' : ''}${esc(p.title)}</a>`).join('');
     h += state.P ? `<a class="cta" href="#/painel">Painel</a><a href="#/sair">Sair</a>` : `<a class="cta" href="#/entrar">Entrar</a>`;
     h += `<button class="iconbtn" id="theme" title="Tema claro/escuro" aria-label="Alternar tema">◐</button>`;
     const nav = $('#nav'); nav.innerHTML = h; nav.classList.remove('open');
@@ -187,12 +193,16 @@
   };
 
   // ---------- páginas públicas ----------
-  const head = (t, sub) => `<div class="pagehead"><div class="wrap"><h1>${esc(t)}</h1>${sub ? `<p class="muted" style="margin:6px 0 0">${esc(sub)}</p>` : ''}</div></div>`;
+  const head = (t, sub, key, img) => {
+    const b = img || (state.site.banners || {})[key];
+    const st = b ? ` style="background-image:linear-gradient(rgba(8,16,38,.72),rgba(8,16,38,.45)),url('${TJ.cssUrl(b)}')"` : '';
+    return `<div class="pagehead${b ? ' has-img' : ''}"${st}><div class="wrap"><h1>${esc(t)}</h1>${sub ? `<p class="muted" style="margin:6px 0 0">${esc(sub)}</p>` : ''}</div></div>`;
+  };
   const empty = (t) => `<div class="empty">${esc(t)}</div>`;
   TJ.head = head;
   const pages = {};
 
-  const annCard = (a) => `<div class="card" style="margin-bottom:14px"><div class="row spread"><span class="tag">${esc(L.cat[a.category] || a.category)}</span><span class="small muted">${TJ.fmtDate(a.created_at)}${a.pinned ? ' · 📌 fixado' : ''}</span></div><h3 style="margin-top:8px">${esc(a.title)}</h3>${TJ.md(a.body)}</div>`;
+  const annCard = (a) => `<div class="card" style="margin-bottom:14px">${a.image_url ? `<img class="cover" src="${esc(a.image_url)}" alt="" loading="lazy">` : ''}<div class="row spread"><span class="tag">${esc(L.cat[a.category] || a.category)}</span><span class="small muted">${TJ.fmtDate(a.created_at)}${a.pinned ? ' · 📌 fixado' : ''}</span></div><h3 style="margin-top:8px">${esc(a.title)}</h3>${TJ.md(a.body)}</div>`;
   const hearCard = (h) => `<div class="card" style="margin-bottom:14px"><div class="row spread"><span class="tag">${esc(L.hear[h.kind] || h.kind)}</span><b>${TJ.fmtDT(h.starts_at)}</b></div><h3 style="margin-top:8px">${esc(h.title)}</h3>${h.place ? `<p class="muted small">Local: ${esc(h.place)}</p>` : ''}${h.notes ? `<p class="small">${esc(h.notes)}</p>` : ''}</div>`;
 
   pages[''] = async (v) => {
@@ -206,7 +216,8 @@
     ]);
     const cases = cs.data || [];
     const stat = (n, t) => `<div class="card stat"><b>${n}</b><span class="muted">${t}</span></div>`;
-    const heroBg = s.hero_image ? ` style="background-image:linear-gradient(135deg,rgba(10,20,40,.82),rgba(10,20,40,.5)),url('${esc(encodeURI(s.hero_image).replace(/'/g, '%27'))}')"` : '';
+    const ov = Math.min(90, Math.max(0, Number(s.hero_overlay ?? 65))) / 100;
+    const heroBg = s.hero_image ? ` style="background-image:linear-gradient(135deg,rgba(10,20,40,${ov + 0.15}),rgba(10,20,40,${Math.max(0, ov - 0.1)})),url('${TJ.cssUrl(s.hero_image)}')"` : '';
     const blocks = [];
     if (H.selection !== false && (rd.data || []).length) blocks.push(`<div class="wrap section" style="padding-bottom:0"><a class="card banner" href="#/selecao"><b>Processo seletivo aberto:</b> ${rd.data.map((r) => esc(r.title)).join(' · ')} — <u>inscreva-se</u></a></div>`);
     if (s.show_stats !== false && H.stats !== false) blocks.push(`<div class="wrap section"><div class="grid g3">
@@ -217,7 +228,7 @@
     if (H.announcements !== false) cols.push(`<div><h2>Últimos comunicados</h2>${(an.data || []).length ? an.data.map(annCard).join('') : empty('Nenhum comunicado ainda.')}<p><a href="#/comunicados">Ver todos →</a></p></div>`);
     if (H.hearings !== false) cols.push(`<div><h2>Próximas audiências</h2>${(hr.data || []).length ? hr.data.map(hearCard).join('') : empty('Nenhuma audiência marcada.')}<p><a href="#/agenda">Ver agenda →</a></p></div>`);
     if (cols.length) blocks.push(`<div class="wrap section"><div class="grid g2" style="align-items:start">${cols.join('')}</div></div>`);
-    v.innerHTML = `<section class="hero"${heroBg}><div class="wrap">
+    v.innerHTML = `<section class="hero${s.hero_align === 'center' ? ' center' : ''}"${heroBg}><div class="wrap">
         <h1>${esc(s.hero_title || s.name)}</h1><p>${esc(s.hero_text || '')}</p>
         <div class="btns"><a class="btn gold" href="#/processos">Consultar processos</a><a class="btn" href="#/comunicados">Ver comunicados</a></div>
       </div></section>${blocks.join('')}`;
@@ -227,16 +238,18 @@
     const { data, error } = await sb().from('cases').select('*').eq('is_public', true).order('opened_at', { ascending: false });
     if (error) throw error;
     const all = data || [];
-    v.innerHTML = head('Processos', 'Consulte o andamento e as provas dos processos públicos.') + `<div class="wrap section">
+    v.innerHTML = head('Processos', 'Consulte o andamento e as provas dos processos públicos.', 'processos') + `<div class="wrap section">
       <div class="toolbar"><input id="q" class="q" type="search" placeholder="Buscar por número, título ou nome…" aria-label="Buscar">
       <select id="st"><option value="">Todas as situações</option>${Object.entries(L.status).map(([k, x]) => `<option value="${k}">${x[0]}</option>`).join('')}</select></div>
-      <div class="grid g2" id="list"></div></div>`;
+      <div class="chips" id="tagchips"></div><div class="grid g2" id="list"></div></div>`;
+    const allTags = [...new Set(all.flatMap((c) => TJ.tagsOf(c.tags)))]; let tag = '';
+    const drawChips = () => { $('#tagchips').innerHTML = allTags.length ? ['', ...allTags].map((t) => `<button class="chip${tag === t ? ' on' : ''}" data-t="${esc(t)}">${t ? esc(t) : 'Todos'}</button>`).join('') : ''; $('#tagchips').querySelectorAll('[data-t]').forEach((b) => (b.onclick = () => { tag = b.dataset.t; drawChips(); draw(); })); };
     const draw = () => {
       const q = $('#q').value.toLowerCase(), st = $('#st').value;
-      const r = all.filter((c) => (!st || c.status === st) && (!q || JSON.stringify([c.number, c.title, c.summary, c.judge, c.prosecutor, c.defense]).toLowerCase().includes(q)));
-      $('#list').innerHTML = r.length ? r.map((c) => `<a class="card" href="#/processo/${c.id}"><div class="row spread"><b>${esc(c.number)}</b>${TJ.tag(L.status, c.status)}</div><h3 style="margin-top:6px">${esc(c.title)}</h3><p class="muted small">${esc((c.summary || '').slice(0, 150))}</p><p class="small muted">${esc(L.kind[c.kind] || c.kind)} · aberto em ${TJ.fmtDate(c.opened_at)}${c.stage ? ' · ' + esc(c.stage) : ''}</p></a>`).join('') : empty('Nenhum processo encontrado.');
+      const r = all.filter((c) => (!st || c.status === st) && (!tag || TJ.tagsOf(c.tags).includes(tag)) && (!q || JSON.stringify([c.number, c.title, c.summary, c.judge, c.prosecutor, c.defense]).toLowerCase().includes(q)));
+      $('#list').innerHTML = r.length ? r.map((c) => `<a class="card" href="#/processo/${c.id}">${c.cover_url ? `<img class="cover" src="${esc(c.cover_url)}" alt="" loading="lazy">` : ''}<div class="row spread"><b>${esc(c.number)}</b>${TJ.tag(L.status, c.status)}</div><h3 style="margin-top:6px">${esc(c.title)}</h3><p class="muted small">${esc((c.summary || '').slice(0, 150))}</p><p class="small muted">${esc(L.kind[c.kind] || c.kind)} · aberto em ${TJ.fmtDate(c.opened_at)}${c.stage ? ' · ' + esc(c.stage) : ''}</p></a>`).join('') : empty('Nenhum processo encontrado.');
     };
-    $('#q').oninput = draw; $('#st').onchange = draw; draw();
+    $('#q').oninput = draw; $('#st').onchange = draw; drawChips(); draw();
   };
 
   pages.processo = async (v, [id]) => {
@@ -249,7 +262,7 @@
       sb().from('evidences').select('*').eq('case_id', id).eq('is_public', true).order('created_at'),
     ]);
     const isImg = (u) => /\.(png|jpe?g|gif|webp)(\?|$)/i.test(u || '');
-    v.innerHTML = head('Processo ' + c.number, c.title) + `<div class="wrap section"><div class="grid g2" style="align-items:start">
+    v.innerHTML = head('Processo ' + c.number, c.title, 'processos', c.cover_url) + `<div class="wrap section"><div class="grid g2" style="align-items:start">
       <div>
         <div class="card"><div class="row spread"><h3 style="margin:0">Resumo</h3>${TJ.tag(L.status, c.status)}</div>
           ${c.summary ? TJ.md(c.summary) : '<p class="muted">Sem resumo.</p>'}
@@ -268,7 +281,15 @@
   pages.comunicados = async (v) => {
     const { data, error } = await sb().from('announcements').select('*').eq('published', true).order('pinned', { ascending: false }).order('created_at', { ascending: false });
     if (error) throw error;
-    v.innerHTML = head('Comunicados', 'Avisos, editais e decisões oficiais.') + `<div class="wrap section" style="max-width:820px">${(data || []).length ? data.map(annCard).join('') : empty('Nenhum comunicado publicado.')}</div>`;
+    const all = data || [], cats = [...new Set(all.map((a) => a.category))]; let cat = '';
+    v.innerHTML = head('Comunicados', 'Avisos, editais e decisões oficiais.', 'comunicados') + `<div class="wrap section" style="max-width:820px"><div class="chips" id="cc"></div><div id="al"></div></div>`;
+    const draw = () => {
+      $('#cc').innerHTML = cats.length > 1 ? ['', ...cats].map((c) => `<button class="chip${cat === c ? ' on' : ''}" data-c="${esc(c)}">${c ? esc(L.cat[c] || c) : 'Todos'}</button>`).join('') : '';
+      $('#cc').querySelectorAll('[data-c]').forEach((b) => (b.onclick = () => { cat = b.dataset.c; draw(); }));
+      const r = all.filter((a) => !cat || a.category === cat);
+      $('#al').innerHTML = r.length ? r.map(annCard).join('') : empty('Nenhum comunicado publicado.');
+    };
+    draw();
   };
 
   pages.agenda = async (v) => {
@@ -276,25 +297,29 @@
     if (error) throw error;
     const now = Date.now(); const all = data || [];
     const up = all.filter((h) => new Date(h.starts_at) >= now), past = all.filter((h) => new Date(h.starts_at) < now).reverse().slice(0, 10);
-    v.innerHTML = head('Agenda', 'Audiências, julgamentos e sessões.') + `<div class="wrap section"><div class="grid g2" style="align-items:start">
+    v.innerHTML = head('Agenda', 'Audiências, julgamentos e sessões.', 'agenda') + `<div class="wrap section"><div class="grid g2" style="align-items:start">
       <div><h2>Próximas</h2>${up.length ? up.map(hearCard).join('') : empty('Nada agendado.')}</div>
       <div><h2>Anteriores</h2>${past.length ? past.map(hearCard).join('') : empty('Sem histórico.')}</div></div></div>`;
   };
 
   pages.selecao = async (v) => {
-    const [r, res] = await Promise.all([
+    const [r, res, iv] = await Promise.all([
       sb().from('selection_rounds').select('*, role:roles(label)').eq('is_public', true).eq('audience', 'publico').order('created_at', { ascending: false }),
       sb().from('applications_public').select('*'),
+      sb().from('interviews_public').select('*').order('interview_at'),
     ]);
     if (r.error) throw r.error;
-    const rounds = r.data || []; const approved = res.data || [];
-    v.innerHTML = head('Processo seletivo', 'Vagas abertas e resultados.') + `<div class="wrap section" style="max-width:860px">${rounds.length ? rounds.map((x) => {
-      const open = x.status === 'aberto';
+    const rounds = r.data || []; const approved = res.data || []; const ivs = iv.data || [];
+    v.innerHTML = head('Processo seletivo', 'Vagas abertas e resultados.', 'selecao') + `<div class="wrap section" style="max-width:860px">${rounds.length ? rounds.map((x) => {
+      const expired = x.closes_at && new Date(x.closes_at) <= new Date();
+      const open = x.status === 'aberto' && !expired;
       const ap = approved.filter((a) => a.round_id === x.id);
+      const sch = ivs.filter((a) => a.round_id === x.id);
       const ff = Array.isArray(x.form_fields) ? x.form_fields : [];
-      return `<div class="card" style="margin-bottom:20px"><div class="row spread"><h3 style="margin:0">${esc(x.title)}</h3>${TJ.tag(L.round, x.status)}</div>
+      return `<div class="card" style="margin-bottom:20px">${x.banner_url ? `<img class="cover" src="${esc(x.banner_url)}" alt="" loading="lazy">` : ''}<div class="row spread"><h3 style="margin:0">${esc(x.title)}</h3>${expired && x.status === 'aberto' ? '<span class="tag gray">Inscrições encerradas</span>' : TJ.tag(L.round, x.status)}</div>
         <p class="small muted">${x.role ? 'Cargo: ' + esc(x.role.label) : ''}${x.closes_at ? ' · inscrições até ' + TJ.fmtDT(x.closes_at) : ''}</p>
         ${x.description ? TJ.md(x.description) : ''}${x.requirements ? '<h4>Requisitos</h4>' + TJ.md(x.requirements) : ''}
+        ${sch.length ? `<h4>Agenda de entrevistas</h4>${sch.map((a) => `<div class="slot"><time>${esc(new Date(a.interview_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))}</time><div><b>${esc(a.roblox_name)}</b><div class="small muted">${esc(new Date(a.interview_at).toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' }))}${a.interview_place ? ' · ' + esc(a.interview_place) : ''}</div></div></div>`).join('')}` : ''}
         ${ap.length ? `<h4>Aprovados</h4><p>${ap.map((a) => `<span class="tag ok">${esc(a.roblox_name)}</span>`).join(' ')}</p>` : ''}
         ${open ? `<details style="margin-top:14px"><summary class="btn gold">Quero me inscrever</summary><form class="apply" data-round="${x.id}" style="margin-top:12px">
           <label>Nome no Roblox *</label><input name="roblox_name" required maxlength="40">
@@ -323,13 +348,13 @@
     const g = {};
     (data || []).forEach((p) => { const k = p.role?.label || p.role_key; (g[k] = g[k] || { rank: p.role?.rank || 0, m: [] }).m.push(p); });
     const groups = Object.entries(g).sort((a, b) => b[1].rank - a[1].rank);
-    v.innerHTML = head('Equipe', 'Quem compõe o Tribunal.') + `<div class="wrap section">${groups.length ? groups.map(([k, x]) => `<h2>${esc(k)}</h2><div class="grid g3" style="margin-bottom:24px">${x.m.map((p) => `<div class="card"><div class="row"><span class="avatar">${esc((p.display_name || p.roblox_name || '?')[0].toUpperCase())}</span><div><b>${esc(p.display_name || p.roblox_name)}</b><div class="muted small">@${esc(p.roblox_name)}</div></div></div>${p.bio ? `<p class="small" style="margin-bottom:0">${esc(p.bio)}</p>` : ''}</div>`).join('')}</div>`).join('') : empty('Equipe ainda não divulgada.')}</div>`;
+    v.innerHTML = head('Equipe', 'Quem compõe o Tribunal.', 'equipe') + `<div class="wrap section">${groups.length ? groups.map(([k, x]) => `<h2>${esc(k)}</h2><div class="grid g3" style="margin-bottom:24px">${x.m.map((p) => `<div class="card"><div class="row">${p.avatar_url ? `<img class="avatar" src="${esc(p.avatar_url)}" alt="">` : `<span class="avatar">${esc((p.display_name || p.roblox_name || '?')[0].toUpperCase())}</span>`}<div><b>${esc(p.display_name || p.roblox_name)}</b><div class="muted small">@${esc(p.roblox_name)}</div></div></div>${p.bio ? `<p class="small" style="margin-bottom:0">${esc(p.bio)}</p>` : ''}</div>`).join('')}</div>`).join('') : empty('Equipe ainda não divulgada.')}</div>`;
   };
 
   pages.p = async (v, [slug]) => {
     const { data, error } = await sb().from('pages').select('*').eq('slug', slug).eq('is_public', true).maybeSingle();
     if (error) throw error;
-    v.innerHTML = data ? head(data.title) + `<div class="wrap section" style="max-width:840px"><div class="card">${TJ.md(data.body)}</div></div>` : head('Página não encontrada') + `<div class="wrap section">${empty('Esta página não existe.')}</div>`;
+    v.innerHTML = data ? head(data.title, '', 'p', data.banner_url) + `<div class="wrap section" style="max-width:840px"><div class="card">${TJ.md(data.body)}</div></div>` : head('Página não encontrada') + `<div class="wrap section">${empty('Esta página não existe.')}</div>`;
   };
 
   pages.entrar = async (v) => {
@@ -398,6 +423,11 @@
     view.innerHTML = '<p class="boot">Carregando…</p>';
     window.scrollTo(0, 0);
     try {
+      const mt = state.site.maintenance || {};
+      if (mt.on && !state.P && !['entrar', 'ativar', 'sair'].includes(r)) {
+        view.innerHTML = `<div class="wrap"><div class="card maint"><div class="big">🛠</div><h2>Site em manutenção</h2><p class="muted">${esc(mt.message || 'Voltamos em breve.')}</p><p class="small"><a href="#/entrar">Acesso de membros</a></p></div></div>`;
+        return;
+      }
       if (r === 'painel') {
         if (!state.P) { location.hash = '#/entrar'; return; }
         await TJ.mountPanel(view, parts.slice(1));
