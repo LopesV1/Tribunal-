@@ -1,4 +1,4 @@
-/* Painel do Tribunal - Discord (v3): vários canais (webhooks), envio, automações por evento e histórico */
+/* Painel do Tribunal - Discord (v5): vários canais (webhooks), envio, automações por evento (pelo servidor quando possível) e histórico */
 (function () {
   const TJ = window.TJ, esc = TJ.esc, $ = TJ.$, state = TJ.state, H = TJ.H, P = TJ.P, F = H.F;
   const sb = () => TJ.sb;
@@ -11,9 +11,6 @@
     interview_schedule: ['Agenda de entrevistas', 'Ao aplicar horários na seleção (opcional)', ['titulo', 'lista']],
     member_promoted: ['Membro promovido', 'Quando o cargo de um membro sobe', ['nome', 'cargo']],
     member_dismissed: ['Membro desligado', 'Quando um membro é desligado', ['nome']],
-    ticket_new: ['Novo chamado (atendimento)', 'Quando alguém abre um chamado — enviado pelo servidor, mesmo sem ninguém logado', ['protocolo', 'categoria', 'assunto', 'nome', 'prioridade', 'texto']],
-    ticket_reply: ['Resposta do solicitante', 'Quando quem abriu o chamado responde — enviado pelo servidor', ['protocolo', 'assunto', 'nome', 'texto']],
-    ticket_closed: ['Chamado resolvido', 'Quando um chamado é marcado como resolvido — enviado pelo servidor', ['protocolo', 'assunto', 'nome']],
   };
   const fill = (tpl, vars) => String(tpl || '').replace(/\{(\w+)\}/g, (_, k) => (vars && vars[k] != null && vars[k] !== '' ? vars[k] : '—'));
   const chunk = (t, n = 1900) => { const out = []; let cur = ''; for (const line of String(t).split('\n')) { if ((cur + '\n' + line).length > n && cur) { out.push(cur); cur = ''; } if (line.length > n) { for (let i = 0; i < line.length; i += n) out.push(line.slice(i, i + n)); continue; } cur = cur ? cur + '\n' + line : line; } if (cur) out.push(cur); return out; };
@@ -30,9 +27,10 @@
   // envia texto simples (com divisão automática) ou embed para um canal
   async function sendTo(ch, o, kind) {
     try {
-      const base = { username: o.username || ch.username || undefined, avatar_url: o.avatar_url || ch.avatar_url || undefined, allowed_mentions: o.mentions ? { parse: ['everyone', 'roles', 'users'] } : { parse: [] } };
+      const site = state.site || {}, u = (x) => TJ.url(x) || undefined;
+      const base = { username: o.username || ch.username || site.name || undefined, avatar_url: u(o.avatar_url) || u(ch.avatar_url) || u(site.logo_url), allowed_mentions: o.mentions ? { parse: ['everyone', 'roles', 'users'] } : { parse: [] } };
       if (o.embed) {
-        await post(ch, Object.assign({}, base, { content: o.content_above || undefined, embeds: [{ title: o.title || undefined, description: String(o.content).slice(0, 4000), color: o.color ? parseInt(o.color.replace('#', ''), 16) : undefined, image: o.image ? { url: o.image } : undefined, thumbnail: o.thumb ? { url: o.thumb } : undefined, footer: o.footer ? { text: o.footer } : undefined, timestamp: o.timestamp ? new Date().toISOString() : undefined }] }));
+        await post(ch, Object.assign({}, base, { content: o.content_above || undefined, embeds: [{ title: o.title || undefined, description: String(o.content).slice(0, 4000), color: /^#[0-9a-f]{6}$/i.test(o.color || '') ? parseInt(o.color.slice(1), 16) : undefined, image: u(o.image) ? { url: u(o.image) } : undefined, thumbnail: u(o.thumb) ? { url: u(o.thumb) } : undefined, footer: o.footer ? { text: o.footer } : undefined, timestamp: o.timestamp ? new Date().toISOString() : undefined }] }));
       } else {
         const parts = chunk(o.content);
         for (let i = 0; i < parts.length; i++) { await post(ch, Object.assign({}, base, { content: parts[i] })); if (i < parts.length - 1) await sleep(700); }
@@ -47,15 +45,26 @@
   }
 
   // ---------- automação ----------
+  // Primeiro tenta pelo servidor (função discord_automate: o endereço do webhook não precisa chegar ao navegador).
+  // Se o servidor não tiver a extensão pg_net, cai no envio pelo navegador (só funciona para quem enxerga os canais).
   TJ.automate = async function (event, vars) {
     try {
+      const clean = {}; Object.entries(vars || {}).forEach(([k, v]) => { clean[k] = v == null ? '' : String(v).slice(0, 1500); });
+      const r = await sb().rpc('discord_automate', { p_event: event, p_vars: clean });
+      if (!r.error) {
+        if (r.data === 'enviado') return TJ.toast('Aviso enviado ao Discord.');
+        if (r.data === 'sem_regra' || r.data === 'sem_permissao' || r.data === 'evento_invalido') return;
+        if (r.data === 'erro' || r.data === 'webhook_invalido') return TJ.toast('O aviso automático ao Discord falhou. Veja Discord › Histórico.', true);
+        // 'sem_pg_net' → tenta pelo navegador
+      }
       const { data: rule } = await sb().from('discord_rules').select('*').eq('event', event).maybeSingle();
       if (!rule || !rule.enabled || !rule.channel_id) return;
       const { data: ch } = await sb().from('discord_channels').select('*').eq('id', rule.channel_id).maybeSingle();
       if (!ch || !ch.active) return;
-      const err = await sendTo(ch, { content: fill(rule.template, vars) }, 'auto:' + event);
-      TJ.toast(err ? 'Aviso automático falhou: ' + err : `Aviso enviado ao Discord (#${ch.name}).`, !!err);
-    } catch (e) { /* automação nunca quebra a ação principal */ }
+      const text = fill(rule.template, vars), first = text.split('\n')[0].replace(/^#+\s*/, '');
+      const err = await sendTo(ch, rule.use_embed ? { content: text.split('\n').slice(1).join('\n').trim() || '—', embed: true, title: first.slice(0, 250), color: rule.color, footer: state.site.short || state.site.name, timestamp: true } : { content: text }, 'auto:' + event);
+      TJ.toast(err ? 'Aviso automático falhou. Veja Discord › Histórico.' : `Aviso enviado ao Discord (#${ch.name}).`, !!err);
+    } catch (e) { console.warn('[tj] automação', e); /* automação nunca quebra a ação principal */ }
   };
 
   // ---------- diálogo de envio rápido (usado em vários lugares) ----------
@@ -101,7 +110,7 @@
       <label class="chk"><input type="checkbox" id="mn"> Permitir marcar @everyone / @cargos</label>
       <p class="row" style="margin-bottom:0"><button class="btn gold" id="go">Enviar agora</button><button class="btn" id="cp">Copiar</button></p></div>
       <div class="card"><h3>Pré-visualização</h3><div id="pv" class="dcpreview"></div></div></div>`;
-    const tx = $('#tx', tc), pv = () => { const n = tx.value.length; $('#cnt', tc).textContent = `${n} caracteres${n > 2000 && $('#mode', tc).value === 'text' ? ' — será dividida em ' + chunk(tx.value).length + ' mensagens' : ''}`; const emb = $('#mode', tc).value === 'embed'; $('#embedf', tc).hidden = !emb; $('#pv', tc).innerHTML = emb ? `<div class="dcembed" style="border-left:4px solid ${esc($('#ec', tc).value)}">${$('#et', tc).value ? `<b>${esc($('#et', tc).value)}</b>` : ''}${TJ.md(tx.value)}${$('#ei', tc).value ? `<img src="${esc($('#ei', tc).value)}" alt="" style="max-width:100%;border-radius:6px;margin-top:8px">` : ''}${$('#ef', tc).value ? `<div class="small muted" style="margin-top:6px">${esc($('#ef', tc).value)}</div>` : ''}</div>` : TJ.md(tx.value) || '<span class="muted">A prévia aparece aqui.</span>'; };
+    const tx = $('#tx', tc), pv = () => { const n = tx.value.length; $('#cnt', tc).textContent = `${n} caracteres${n > 2000 && $('#mode', tc).value === 'text' ? ' — será dividida em ' + chunk(tx.value).length + ' mensagens' : ''}`; const emb = $('#mode', tc).value === 'embed'; $('#embedf', tc).hidden = !emb; $('#pv', tc).innerHTML = emb ? `<div class="dcembed" style="border-left:4px solid ${/^#[0-9a-f]{6}$/i.test($('#ec', tc).value) ? $('#ec', tc).value : '#c9a24b'}">${$('#et', tc).value ? `<b>${esc($('#et', tc).value)}</b>` : ''}${TJ.md(tx.value)}${TJ.url($('#ei', tc).value) ? `<img src="${esc(TJ.url($('#ei', tc).value))}" alt="" style="max-width:100%;border-radius:6px;margin-top:8px">` : ''}${$('#ef', tc).value ? `<div class="small muted" style="margin-top:6px">${esc($('#ef', tc).value)}</div>` : ''}</div>` : TJ.md(tx.value) || '<span class="muted">A prévia aparece aqui.</span>'; };
     tc.querySelectorAll('input,textarea,select').forEach((i) => i.addEventListener('input', pv)); pv();
     $('#an', tc).onchange = () => { const a = (anns || []).find((x) => x.id === $('#an', tc).value); if (a) { tx.value = `# ${a.title}\n${a.body || ''}`; $('#et', tc).value = a.title; pv(); } };
     $('#cp', tc).onclick = () => TJ.copy(tx.value, 'Copiado em markdown!');
@@ -119,7 +128,7 @@
 
   async function tabCanais(tc) {
     const can = TJ.can('manage_site');
-    tc.innerHTML = `<div class="card" style="margin-bottom:16px"><b>Como pegar o webhook de um canal</b><p class="small muted" style="margin-bottom:0">No Discord: Configurações do canal › Integrações › Webhooks › Novo webhook › Copiar URL do webhook. Cadastre um por canal (avisos, audiências, seleção…). Quem tem acesso ao painel consegue enviar mensagens nesses canais, então cadastre só os que quiser.</p></div><div id="lst"></div>`;
+    tc.innerHTML = `<div class="notice" role="note"><b>Segurança:</b> o endereço do webhook funciona como uma senha — quem o tem consegue postar no canal. Aqui ele só é visível para quem gerencia o site ou os comunicados. Se um webhook vazar, apague-o no Discord (Integrações › Webhooks) e cadastre outro.</div><div class="card" style="margin-bottom:16px"><b>Como pegar o webhook de um canal</b><p class="small muted" style="margin-bottom:0">No Discord: Configurações do canal › Integrações › Webhooks › Novo webhook › Copiar URL do webhook. Cadastre um por canal (avisos, audiências, seleção…). Quem tem acesso ao painel consegue enviar mensagens nesses canais, então cadastre só os que quiser.</p></div><div id="lst"></div>`;
     await TJ.crud($('#lst', tc), { id: 'dchannels', table: 'discord_channels', order: ['name'], newLabel: 'Novo canal', canWrite: can, defaults: { active: true },
       beforeSave: (p) => { if (!validHook(p.webhook_url)) throw new Error('O link do webhook parece inválido. Ele começa com https://discord.com/api/webhooks/'); p.webhook_url = p.webhook_url.trim(); p.name = String(p.name || '').replace(/^#/, '').trim(); },
       fields: [{ k: 'name', label: 'Nome do canal', req: true, ph: 'Ex.: avisos-gerais' }, { k: 'webhook_url', label: 'URL do webhook', req: true, ph: 'https://discord.com/api/webhooks/…' }, { k: 'description', label: 'Para que serve (opcional)' }, { k: 'username', label: 'Nome do remetente (opcional)', ph: 'Tribunal de Justiça' }, { k: 'avatar_url', label: 'Foto do remetente', upload: 'midia' }, { k: 'active', label: 'Canal ativo', type: 'bool' }],
@@ -129,19 +138,21 @@
 
   async function tabAuto(tc) {
     const can = TJ.can('manage_site');
-    const [chs, { data: rules }] = await Promise.all([sb().from('discord_channels').select('id,name,active').order('name'), sb().from('discord_rules').select('*')]);
+    const [{ data: chs }, { data: rules }] = await Promise.all([sb().from('discord_channels').select('id,name,active').order('name'), sb().from('discord_rules').select('*')]);
     const byEv = Object.fromEntries((rules || []).map((r) => [r.event, r]));
-    tc.innerHTML = `<div class="card" style="margin-bottom:16px"><b>Avisos automáticos</b><p class="small muted" style="margin-bottom:0">Escolha o que o site avisa sozinho e em qual canal. Os avisos comuns são enviados do seu navegador no momento da ação (ex.: ao salvar a audiência). Os de atendimento saem direto do servidor. Use <b>Enviar teste</b> para conferir o canal.</p></div>
+    tc.innerHTML = `<div class="card" style="margin-bottom:16px"><b>Avisos automáticos</b><p class="small muted" style="margin-bottom:0">Escolha o que o site avisa sozinho e em qual canal. Quando o servidor estiver preparado (extensão <code>pg_net</code>, que o <b>schema_v5.sql</b> tenta ativar), o aviso sai direto do servidor e o endereço do webhook não passa pelo navegador de quem fez a ação. Se não estiver, o site tenta pelo navegador de quem tem acesso aos canais. Use <b>Enviar teste</b> para conferir o canal.</p></div>
       ${Object.entries(EVENTS).map(([ev, [t, d, vars]]) => { const r = byEv[ev] || { enabled: false, template: '' }; return `<div class="card" data-ev="${ev}" style="margin-bottom:14px"><div class="row spread"><div><b>${t}</b><div class="small muted">${d}</div></div><label class="chk" style="margin:0"><input type="checkbox" class="en"${r.enabled ? ' checked' : ''}${can ? '' : ' disabled'}> Ativo</label></div>
         <label>Canal</label><select class="ch"${can ? '' : ' disabled'}><option value="">— escolher —</option>${(chs || []).map((c) => `<option value="${c.id}"${r.channel_id === c.id ? ' selected' : ''}>#${esc(c.name)}${c.active ? '' : ' (inativo)'}</option>`).join('')}</select>
         <label>Mensagem <span class="muted small">campos: ${vars.map((v) => `<code>{${v}}</code>`).join(' ')}</span></label><textarea class="tp" rows="4"${can ? '' : ' disabled'}>${esc(r.template || '')}</textarea>
+        <div class="row" style="margin-top:8px"><label class="chk" style="margin:0"><input type="checkbox" class="ue"${r.use_embed ? ' checked' : ''}${can ? '' : ' disabled'}> Enviar como cartão (1ª linha vira o título)</label><input type="color" class="ecol" value="${esc(/^#[0-9a-f]{6}$/i.test(r.color || '') ? r.color : '#c9a24b')}" aria-label="Cor do cartão"${can ? '' : ' disabled'} style="width:56px;height:38px;padding:2px;flex:none"></div>
         ${can ? '<p class="row" style="margin-bottom:0"><button class="btn sm gold sv">Salvar</button><button class="btn sm pr">Pré-visualizar</button><button class="btn sm ts">Enviar teste</button></p>' : ''}</div>`; }).join('')}`;
     tc.querySelectorAll('[data-ev]').forEach((card) => {
       const ev = card.dataset.ev; const ex = Object.fromEntries(EVENTS[ev][2].map((v) => [v, '(' + v + ')']));
       const pr = card.querySelector('.pr'); if (pr) pr.onclick = () => TJ.dlg(`<h3>Pré-visualização</h3><div class="dcpreview">${TJ.md(fill(card.querySelector('.tp').value, ex))}</div><p><button class="btn" data-close>Fechar</button></p>`);
-      const ts = card.querySelector('.ts'); if (ts) ts.onclick = async () => { const id = card.querySelector('.ch').value; if (!id) return TJ.toast('Escolha um canal primeiro.', true); const { data: ch } = await sb().from('discord_channels').select('*').eq('id', id).maybeSingle(); const err = await sendTo(ch, { content: '🧪 *Teste*\n' + fill(card.querySelector('.tp').value, ex) }, 'teste:' + ev); TJ.toast(err || 'Teste enviado!', !!err); };
+      const ts = card.querySelector('.ts'); if (ts) ts.onclick = async () => { const id = card.querySelector('.ch').value; if (!id) return TJ.toast('Escolha um canal primeiro.', true); const { data: ch } = await sb().from('discord_channels').select('*').eq('id', id).maybeSingle(); const txt = '🧪 Teste\n' + fill(card.querySelector('.tp').value, ex), emb = card.querySelector('.ue').checked; const err = await sendTo(ch, emb ? { content: txt.split('\n').slice(1).join('\n') || '—', embed: true, title: txt.split('\n')[0], color: card.querySelector('.ecol').value, footer: state.site.short || state.site.name, timestamp: true } : { content: txt }, 'teste:' + ev); TJ.toast(err || 'Teste enviado!', !!err); };
       const sv = card.querySelector('.sv'); if (sv) sv.onclick = async () => {
-        const row = { event: ev, enabled: card.querySelector('.en').checked, channel_id: card.querySelector('.ch').value || null, template: card.querySelector('.tp').value };
+        const row = { event: ev, enabled: card.querySelector('.en').checked, channel_id: card.querySelector('.ch').value || null, template: card.querySelector('.tp').value, use_embed: card.querySelector('.ue').checked, color: card.querySelector('.ecol').value };
+        if (row.template.length > 1800) return TJ.toast('A mensagem pode ter no máximo 1800 caracteres.', true);
         if (row.enabled && !row.channel_id) return TJ.toast('Escolha um canal para ativar.', true);
         const { error } = await sb().from('discord_rules').upsert(row, { onConflict: 'event' }); TJ.toast(error ? error.message : 'Automação salva.', !!error);
       };

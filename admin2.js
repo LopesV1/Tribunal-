@@ -39,7 +39,7 @@
           <button class="btn sm" id="mwarn">Advertir</button>
           ${st === 'ativo' ? '<button class="btn sm danger" id="msusp">Suspender</button><button class="btn sm danger fill" id="mfire">Demitir</button>' : '<button class="btn sm gold" id="mback">Reintegrar ao Tribunal</button>'}
         </div></div>
-      <div class="dsec"><h4>Senha</h4><div class="row"><input id="mpass" type="text" placeholder="Nova senha (mín. 8 caracteres)" style="flex:1" autocomplete="off"><button class="btn sm" id="mpassbtn">Redefinir senha</button></div><div class="help">Use se o membro esqueceu a senha. Passe a nova senha para ele pelo Discord.</div></div>` : `<p class="muted small" style="margin-top:12px">${self ? 'Esta é a sua conta. Para mudar seu perfil, use "Minha conta".' : 'Você não pode gerir este membro (cargo igual ou superior ao seu).'}</p>`}
+      <div class="dsec"><h4>Senha</h4><div class="row"><input id="mpass" type="text" placeholder="Nova senha (8+ caracteres, letras e números)" style="flex:1" autocomplete="off"><button class="btn sm" id="mpassbtn">Redefinir senha</button></div><div class="help">Use se o membro esqueceu a senha. Passe a nova senha para ele pelo Discord.</div></div>` : `<p class="muted small" style="margin-top:12px">${self ? 'Esta é a sua conta. Para mudar seu perfil, use "Minha conta".' : 'Você não pode gerir este membro (cargo igual ou superior ao seu).'}</p>`}
       <div class="dsec"><h4>Anotação interna</h4><div class="row"><input id="mnote" placeholder="Registrar uma observação sobre este membro" style="flex:1"><button class="btn sm" id="mnotebtn">Salvar anotação</button></div></div>
       <div class="dsec"><h4>Histórico</h4><div class="hist">${(evs || []).length ? evs.map((e) => `<div class="item"><b>${esc(EV[e.kind] || e.kind)}</b>${e.title ? ' — ' + esc(e.title) : ''}<br>${e.detail ? `<span>${esc(e.detail)}</span><br>` : ''}<small>${esc(TJ.fmtDT(e.at))}${e.by_id && by[e.by_id] ? ' · por ' + esc(by[e.by_id]) : ''}</small></div>`).join('') : '<p class="muted small">Sem registros.</p>'}</div></div>
       <p style="margin-top:18px"><button class="btn" data-close>Fechar</button></p>`);
@@ -79,7 +79,7 @@
     });
     on('mpassbtn', async () => {
       const pw = dlg.querySelector('#mpass').value;
-      if (pw.length < 8) return TJ.toast('A senha precisa ter 8 ou mais caracteres.', true);
+      const weak = TJ.pwProblem(pw, m.roblox_name); if (weak) return TJ.toast(weak, true);
       const r = await sb().rpc('admin_set_password', { p_user: m.id, p_pass: pw });
       if (r.error) return TJ.toast(r.error.message, true);
       await logEvent(m.id, 'nota', 'Senha redefinida pela coordenação'); done('Senha redefinida.');
@@ -124,7 +124,7 @@
   // SITE E APARÊNCIA
   // =====================================================================
   async function saveSite(patch) {
-    const v = Object.assign({}, state.site, patch);
+    const v = Object.assign({}, state.site, patch, { ui_v5: true });
     const r = await sb().from('settings').upsert({ key: 'site', value: v, is_public: true });
     if (r.error) { TJ.toast(r.error.message, true); return false; }
     await TJ.loadSettings(); TJ.toast('Salvo! Já aplicado.'); return true;
@@ -139,7 +139,9 @@
     };
   }
 
-  const BACKUP_TABLES = ['roles', 'profiles', 'member_events', 'cases', 'case_parties', 'case_events', 'evidences', 'filings', 'templates', 'announcements', 'board_posts', 'hearings', 'tasks', 'selection_rounds', 'applications', 'questions', 'pages', 'discord_rules'];
+  TJ.saveSite = saveSite; TJ.siteForm = siteForm;
+
+  const BACKUP_TABLES = ['roles', 'profiles', 'member_events', 'cases', 'case_parties', 'case_events', 'evidences', 'filings', 'templates', 'announcements', 'board_posts', 'hearings', 'tasks', 'selection_rounds', 'applications', 'questions', 'pages', 'discord_rules', 'library_docs'];
 
   P.site = async (el, [tab = 'aparencia']) => {
     el.innerHTML = H.head('Site e aparência', 'Tudo que você vê no site público pode ser mudado aqui, sem mexer em código.') +
@@ -149,28 +151,50 @@
     const nested = (obj, key) => (S[obj] || {})[key];
     const setNested = (obj, key) => (p, v) => (p[obj] = Object.assign({}, p[obj] || S[obj] || {}, { [key]: v }));
     if (tab === 'aparencia') {
-      siteForm(tc, [
+      const cr = (hex) => TJ.contrast(hex, '#ffffff');
+      tc.innerHTML = `<div class="card" style="max-width:680px;margin-bottom:16px"><h3>Paletas prontas</h3><p class="muted small">Toque para aplicar nas cores abaixo (ainda precisa salvar). Todas passam no teste de contraste.</p><div class="row" id="pal">${TJ.presets.map(([n, p, a], i) => `<button type="button" class="btn sm" data-p="${i}" title="${esc(n)}"><span aria-hidden="true" style="display:inline-block;width:14px;height:14px;border-radius:50%;background:${esc(p)};border:2px solid ${esc(a)};vertical-align:-2px;margin-right:6px"></span>${esc(n)}</button>`).join('')}</div></div><div id="sfw"></div>`;
+      const w = $('#sfw', tc);
+      siteForm(w, [
         { k: 'name', label: 'Nome completo do tribunal', req: true }, { k: 'short', label: 'Nome curto (topo)' }, { k: 'subtitle', label: 'Subtítulo do topo' },
-        { k: 'logo_url', label: 'Brasão / logo', upload: 'midia' }, { k: 'favicon_url', label: 'Ícone da aba do navegador (opcional)', upload: 'midia' },
-        { k: 'style', label: 'Estilo do site', type: 'select', opts: [['moderno', 'Moderno (barra flutuante, cantos arredondados)'], ['classico', 'Clássico (barra reta, bordas douradas)']] },
-        { k: 'primary', label: 'Cor principal', type: 'color' }, { k: 'accent', label: 'Cor de destaque (dourado)', type: 'color' },
+        { k: 'logo_url', label: 'Brasão / logo', upload: 'midia', help: 'Use um brasão seu ou livre de direitos autorais.' }, { k: 'favicon_url', label: 'Ícone da aba do navegador (opcional)', upload: 'midia' },
+        { k: 'style', label: 'Estilo do site', type: 'select', opts: [['institucional', 'Institucional (sóbrio, barra clara, cantos suaves)'], ['moderno', 'Moderno (mais cor e cantos arredondados)']] },
+        { k: 'header', label: 'Barra do topo', type: 'select', opts: [['light', 'Clara'], ['dark', 'Escura (cor principal)']] },
+        { k: 'primary', label: 'Cor principal', type: 'color', help: 'Precisa ter bom contraste com texto branco (mínimo 4,5). Cores claras demais são recusadas.' },
+        { k: 'accent', label: 'Cor de destaque', type: 'color' },
         { k: 'font', label: 'Fonte dos títulos', type: 'select', opts: [['sans', 'Moderna (sem serifa)'], ['serif', 'Clássica (com serifa)']] },
         { k: 'radius', label: 'Arredondamento dos cantos (0 a 28)', type: 'number' },
         { k: 'density', label: 'Espaçamento', type: 'select', opts: [['compact', 'Compacto'], ['normal', 'Normal'], ['comfortable', 'Confortável']] },
         { k: 'footer', label: 'Texto do rodapé', type: 'textarea', rows: 2 }, { k: 'discord_url', label: 'Link de convite do Discord' },
-      ], can);
+      ], can, '<p class="muted small" id="crmsg" aria-live="polite"></p>');
+      const form = $('#sf', w);
+      const note = () => { const v = TJ.readField({ k: 'primary', type: 'color' }, w), c = cr(v); $('#crmsg', w).innerHTML = c >= 4.5 ? `Contraste da cor principal com texto branco: <b>${c.toFixed(1)}</b> — ok.` : `<b style="color:var(--bad,#b3261e)">Contraste ${c.toFixed(1)} é baixo demais</b> (mínimo 4,5). Escolha uma cor mais escura.`; };
+      note();
+      form.addEventListener('input', note);
+      tc.querySelectorAll('[data-p]').forEach((b) => (b.onclick = () => {
+        const [, p, a] = TJ.presets[+b.dataset.p];
+        const set = (k, v) => { const i = w.querySelector('#f_' + k); if (i) i.value = v; };
+        set('primary', p); set('accent', a); note();
+      }));
+      // trava o envio quando a cor principal não passa no contraste (o capturador do siteForm roda depois deste)
+      form.addEventListener('submit', (e) => {
+        const v = TJ.readField({ k: 'primary', type: 'color' }, w);
+        if (cr(v) < 4.5) { e.preventDefault(); e.stopImmediatePropagation(); TJ.toast('A cor principal está clara demais para o texto branco. Escolha uma mais escura.', true); }
+      }, true);
     } else if (tab === 'imagens') {
-      const pg = [['processos', 'Processos'], ['comunicados', 'Comunicados'], ['agenda', 'Agenda'], ['selecao', 'Seleção'], ['equipe', 'Equipe']];
+      const pg = [['processos', 'Processos'], ['comunicados', 'Comunicados'], ['agenda', 'Agenda'], ['selecao', 'Seleção'], ['biblioteca', 'Biblioteca'], ['equipe', 'Equipe']];
       siteForm(tc, [
-        { k: 'hero_image', label: 'Imagem de fundo da página inicial', upload: 'midia', help: 'Imagem larga (ex.: 1600x700). Um filtro escuro é aplicado por cima.' },
+        { k: 'hero_image', label: 'Imagem de fundo da página inicial', upload: 'midia', help: 'Imagem larga (ex.: 1600x700), PNG/JPG/WEBP até 5 MB. Um filtro escuro é aplicado por cima.' },
         { k: 'hero_overlay', label: 'Escurecimento da imagem (0 a 90)', type: 'number', help: 'Quanto maior, mais escura a imagem (melhora a leitura do texto).' },
         { k: 'hero_align', label: 'Alinhamento do texto da capa', type: 'select', opts: [['left', 'À esquerda'], ['center', 'Centralizado']] },
+        { k: 'hero_size', label: 'Altura da capa', type: 'select', opts: [['', 'Normal'], ['short', 'Baixa'], ['tall', 'Alta']] },
         ...pg.map(([k, t]) => ({ k: 'b_' + k, label: `Banner da página ${t}`, upload: 'midia', get: () => nested('banners', k), set: setNested('banners', k) })),
-      ], can, '<p class="muted small">Todas as imagens são opcionais. Para tirar uma imagem, apague o link e salve. Capas de processos, imagens de comunicados e banners de vagas são colocados nos próprios formulários.</p>');
+      ], can, '<p class="muted small">Todas as imagens são opcionais. Para tirar uma imagem, apague o link e salve. Só use imagens suas ou com autorização (direitos autorais): o site não confere isso por você. Capas de processos, imagens de comunicados e banners de vagas são colocados nos próprios formulários.</p>');
     } else if (tab === 'inicio') {
       const hv = (k) => (S.home || {})[k] !== false;
       siteForm(tc, [
+        { k: 'hero_kicker', label: 'Linha pequena acima do título', ph: 'Poder Judiciário · Roleplay' },
         { k: 'hero_title', label: 'Título da página inicial' }, { k: 'hero_text', label: 'Texto de apresentação', type: 'textarea', rows: 3 },
+        { k: 'h_quick', label: 'Mostrar atalhos rápidos (cartões de acesso)', type: 'bool', get: () => hv('quick'), set: (p, v) => (p.home = Object.assign({}, p.home || S.home, { quick: v })) },
         { k: 'h_stats', label: 'Mostrar contadores de processos', type: 'bool', get: () => S.show_stats !== false && hv('stats'), set: (p, v) => { p.show_stats = v; p.home = Object.assign({}, p.home || S.home, { stats: v }); } },
         { k: 'h_ann', label: 'Mostrar últimos comunicados', type: 'bool', get: () => hv('announcements'), set: (p, v) => (p.home = Object.assign({}, p.home || S.home, { announcements: v })) },
         { k: 'h_hear', label: 'Mostrar próximas audiências', type: 'bool', get: () => hv('hearings'), set: (p, v) => (p.home = Object.assign({}, p.home || S.home, { hearings: v })) },
@@ -179,8 +203,8 @@
     } else if (tab === 'menu') {
       let items = TJ.navItems().map((i) => ({ ...i }));
       const draw = () => {
-        tc.innerHTML = `<div class="card navedit" style="max-width:720px"><p class="muted small">Renomeie, escolha um emoji de ícone, esconda ou mude a ordem dos itens do menu do site. (Páginas extras aparecem no menu pela aba <b>Páginas</b>.)</p>
-          ${items.map((it, i) => `<div class="row"><input type="text" data-e="${i}" value="${esc(it.icon || '')}" maxlength="4" placeholder="🙂" style="width:64px;flex:none;text-align:center"><input type="text" data-i="${i}" value="${esc(it.label)}"><label class="chk" style="margin:0"><input type="checkbox" data-v="${i}"${it.show ? ' checked' : ''}> visível</label><button class="btn sm" data-up="${i}">↑</button><button class="btn sm" data-dn="${i}">↓</button></div>`).join('')}
+        tc.innerHTML = `<div class="card navedit" style="max-width:720px"><p class="muted small">Renomeie, desative ou mude a ordem dos itens do menu do site. Item desativado some do menu e a página deixa de abrir. (Páginas extras aparecem no menu pela aba <b>Páginas</b>.)</p>
+          ${items.map((it, i) => `<div class="row"><input type="text" data-e="${i}" value="${esc(it.icon || '')}" maxlength="4" placeholder="🙂" style="width:64px;flex:none;text-align:center"><input type="text" data-i="${i}" value="${esc(it.label)}"><label class="chk" style="margin:0"><input type="checkbox" data-v="${i}"${it.show ? ' checked' : ''}> ativo</label><button class="btn sm" data-up="${i}" aria-label="Subir ${esc(it.label)}">↑</button><button class="btn sm" data-dn="${i}">↓</button></div>`).join('')}
           <p style="margin-bottom:0"><button class="btn gold" id="mn"${can ? '' : ' disabled'}>Salvar menu</button> <button class="btn" id="mr">Restaurar padrão</button></p></div>`;
         tc.querySelectorAll('[data-i]').forEach((x) => (x.oninput = () => (items[+x.dataset.i].label = x.value)));
         tc.querySelectorAll('[data-e]').forEach((x) => (x.oninput = () => (items[+x.dataset.e].icon = x.value)));
@@ -209,7 +233,7 @@
       tc.innerHTML = `<div class="card" style="max-width:680px"><h3>Discord</h3><p class="muted">Os canais (webhooks), o envio de mensagens, as automações e o histórico agora ficam na área <b>Discord</b> do painel.</p><p><a class="btn gold" href="#/painel/discord">Abrir a área Discord →</a></p></div>`;
     } else {
       siteForm(tc, [{ k: 'custom_css', label: 'CSS personalizado (avançado)', type: 'textarea', rows: 10, help: 'Para quem entende de CSS: estilos extras aplicados em todo o site. Se algo quebrar, apague o conteúdo e salve.' }], can, '<p class="muted small">Área avançada. A maioria das mudanças visuais já está em <b>Aparência</b> e <b>Imagens e banners</b>.</p>');
-      tc.insertAdjacentHTML('beforeend', `<div class="card" style="max-width:680px;margin-top:16px"><h3>Backup dos dados</h3><p class="muted small">Baixa um arquivo JSON com processos, peças, comunicados, vagas, candidatos, perguntas, membros e mais. Guarde em lugar seguro. (Senhas e webhooks do Discord não entram.)</p><p style="margin-bottom:0"><button class="btn blue" id="bk">⬇ Baixar backup completo</button></p></div>`);
+      tc.insertAdjacentHTML('beforeend', `<div class="card" style="max-width:680px;margin-top:16px"><h3>Backup dos dados</h3><p class="muted small">Baixa um arquivo JSON com processos, peças, comunicados, vagas, candidatos, perguntas, membros, biblioteca e mais. <b>Atenção:</b> o arquivo contém dados pessoais (candidaturas e membros, protegidos pela LGPD). Guarde em lugar seguro, não envie em grupos e apague quando não precisar mais. (Senhas e webhooks do Discord não entram.)</p><p style="margin-bottom:0"><button class="btn blue" id="bk">⬇ Baixar backup completo</button></p></div>`);
       $('#bk', tc).onclick = async () => {
         TJ.toast('Gerando backup…'); const out = { gerado_em: new Date().toISOString(), site: state.site };
         for (const t of BACKUP_TABLES) { const r = await sb().from(t).select('*').limit(10000); out[t] = r.error ? { erro: r.error.message } : r.data; }

@@ -15,32 +15,11 @@
     manage_selection: 'Gerir processo seletivo, entrevistas e perguntas',
     manage_users: 'Gerir membros, convites e cargos',
     manage_site: 'Gerir aparência e páginas do site',
-    manage_tickets: 'Gerir a linha de atendimento (chamados, categorias, FAQ)',
+    manage_library: 'Gerir a biblioteca (normas, manuais, modelos)',
     view_audit: 'Ver o histórico de alterações',
   };
 
-  const IC = {
-    home: 'M3 11l9-8 9 8v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z',
-    briefcase: 'M3 7h18v13H3z M8 7V4h8v3',
-    file: 'M6 2h9l5 5v15H6z M14 2v6h6 M9 13h8 M9 17h8',
-    copy: 'M8 8h12v13H8z M4 16V3h12',
-    calendar: 'M3 5h18v16H3z M3 10h18 M8 2v6 M16 2v6',
-    pin: 'M3 11v2a1 1 0 0 0 1 1h3l5 4V6L7 10H4a1 1 0 0 0-1 1z M16 8a5 5 0 0 1 0 8',
-    clip: 'M9 2h6v4H9z M7 4H5v18h14V4h-2 M9 13l2 2 4-4',
-    bell: 'M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9 M10 21a2 2 0 0 0 4 0',
-    check: 'M4 12l5 5L20 6',
-    users: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M22 21v-2a4 4 0 0 0-3-3.9 M16 3.1a4 4 0 0 1 0 7.8',
-    sliders: 'M4 21v-7 M4 10V3 M12 21v-9 M12 8V3 M20 21v-5 M20 12V3 M1 14h6 M9 8h6 M17 16h6',
-    clock: 'M3 12a9 9 0 1 0 3-6.7 M3 4v5h5 M12 7v5l3 2',
-    user: 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2 M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8',
-    send: 'M22 2L11 13 M22 2l-7 20-4-9-9-4z',
-    tasks: 'M9 6h12 M9 12h12 M9 18h12 M3 6l1 1 2-2 M3 12l1 1 2-2 M3 18l1 1 2-2',
-    search: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16 M21 21l-4.3-4.3',
-    menu: 'M4 6h16 M4 12h16 M4 18h16',
-    headset: 'M4 14v-2a8 8 0 0 1 16 0v2 M4 14h3v6H4z M17 14h3v6h-3z M20 20a4 4 0 0 1-4 2h-2',
-    out: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4 M16 17l5-5-5-5 M21 12H9',
-  };
-  const icon = (n) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${IC[n] || IC.file}"/></svg>`;
+  const icon = TJ.icon;
 
   // ---------- auxiliares ----------
   const toLocal = (iso) => {
@@ -74,6 +53,20 @@
     isAll: () => (state.P?.role?.perms || []).includes('*'),
   });
   const F = H.F;
+  // cabeçalho enxuto quando a página está dentro de uma aba de outra
+  H.hd = (embed) => (embed ? (t, sub, right) => (sub || right ? `<div class="phead" style="margin-bottom:8px"><p class="muted" style="margin:0">${sub || ''}</p>${right || ''}</div>` : '') : H.head);
+
+  // regras de envio de arquivos (espelham os limites das pastas no Supabase)
+  const IMG = ['image/png', 'image/jpeg', 'image/webp'];
+  const UP = { site: { mb: 5, types: [...IMG, 'image/gif'] }, midia: { mb: 5, types: [...IMG, 'image/gif'] }, avatares: { mb: 2, types: IMG }, provas: { mb: 25, types: [...IMG, 'image/gif', 'application/pdf', 'video/mp4', 'video/webm'] }, biblioteca: { mb: 15, types: [...IMG, 'application/pdf'] } };
+  TJ.uploadAccept = (b) => ((UP[b] || {}).types || []).join(',');
+  TJ.checkFile = (bucket, file) => {
+    const r = UP[bucket]; if (!r) return 'Pasta de arquivos desconhecida.';
+    if (!r.types.includes(file.type)) return 'Tipo de arquivo não aceito. Aceitos: ' + r.types.map((t) => t.split('/')[1].replace('jpeg', 'jpg').toUpperCase()).join(', ') + '.';
+    if (file.size > r.mb * 1048576) return `Arquivo grande demais (máximo ${r.mb} MB).`;
+    return '';
+  };
+  TJ.safeName = (file) => `${Date.now()}-${(crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2)).slice(0, 8)}.${(String(file.name).split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'bin'}`;
 
   // janela genérica
   TJ.dlg = function (html, mount) {
@@ -113,7 +106,7 @@
     else if (t === 'color') inp = `<input type="color" id="${id}" value="${esc(v || '#000000')}" style="height:44px;padding:3px">`;
     else {
       inp = `<input type="text" id="${id}" value="${esc(v ?? '')}"${req} placeholder="${esc(f.ph || '')}">`;
-      if (f.upload) inp += `<input type="file" data-up="${id}" data-bucket="${f.upload}" style="margin-top:6px"><div class="help">Ou envie um arquivo (imagem, vídeo, PDF) acima — o link é preenchido sozinho.</div>`;
+      if (f.upload) inp += `<input type="file" data-up="${id}" data-bucket="${f.upload}" accept="${esc(TJ.uploadAccept(f.upload))}" style="margin-top:6px" aria-label="Enviar arquivo: ${esc(f.label)}"><div class="help">Ou envie um arquivo acima (até ${(UP[f.upload] || {}).mb} MB) — o link é preenchido sozinho. Use só arquivos seus, livres de direitos ou com autorização de quem criou.</div>`;
     }
     return `<label for="${id}">${esc(f.label)}${f.req ? ' *' : ''}</label>${inp}${help}`;
   }
@@ -148,9 +141,11 @@
     root.querySelectorAll('input[type=file][data-up]').forEach((inp) => {
       inp.onchange = async () => {
         const file = inp.files[0]; if (!file) return;
+        const bad = TJ.checkFile(inp.dataset.bucket, file);
+        if (bad) { inp.value = ''; return TJ.toast(bad, true); }
         TJ.toast('Enviando arquivo…');
-        const path = `${Date.now()}-${file.name.normalize('NFD').replace(/[^\w.\-]+/g, '_')}`;
-        const { error } = await sb().storage.from(inp.dataset.bucket).upload(path, file);
+        const path = TJ.safeName(file);
+        const { error } = await sb().storage.from(inp.dataset.bucket).upload(path, file, { contentType: file.type });
         if (error) return TJ.toast('Falha no envio: ' + error.message, true);
         root.querySelector('#' + inp.dataset.up).value = sb().storage.from(inp.dataset.bucket).getPublicUrl(path).data.publicUrl;
         TJ.toast('Arquivo enviado.');
@@ -241,7 +236,7 @@
       Object.entries(cfg.filter || {}).forEach(([k, v]) => (qq = qq.eq(k, v)));
       if (cfg.order) qq = qq.order(cfg.order[0], { ascending: cfg.order[1] !== false });
       const { data, error } = await qq.limit(2000);
-      if (error) { el.innerHTML = `<div class="card"><b>Erro:</b> ${esc(error.message)}</div>`; return; }
+      if (error) { el.innerHTML = `<div class="card"><b>Não foi possível carregar.</b> ${esc(TJ.friendly(error.message))}</div>`; return; }
       rows = data || []; render();
     }
 
@@ -271,13 +266,13 @@
         <span class="popwrap"><button class="btn sm" id="gear" title="Escolher colunas">⚙ Colunas</button><div class="pop" id="pop" hidden><h4>Mostrar colunas</h4>${cfg.cols.map((c) => `<label class="chk"><input type="checkbox" data-col="${esc(c.label)}"${hidden.includes(c.label) ? '' : ' checked'}> ${esc(c.label)}</label>`).join('')}<p style="margin:8px 0 0"><button class="btn sm" id="reset">Restaurar</button></p></div></span>
         <button class="btn sm" id="csv" title="Baixar em planilha (CSV)">⬇ CSV</button>
         ${canWrite && !cfg.noCreate ? `<button class="btn gold" id="new">+ ${esc(cfg.newLabel || 'Novo')}</button>` : ''}</div>
-        <div class="tablewrap"><table><thead><tr>${vc.map(([c, i]) => `<th class="sortable" data-s="${i}">${esc(c.label)}${sort.i === i ? (sort.dir > 0 ? ' ▲' : ' ▼') : ''}</th>`).join('')}${cfg.actions ? '<th></th>' : ''}</tr></thead><tbody id="tb"></tbody></table></div>
+        <div class="tablewrap"><table><thead><tr>${vc.map(([c, i]) => `<th class="sortable" data-s="${i}" tabindex="0" scope="col">${esc(c.label)}${sort.i === i ? (sort.dir > 0 ? ' ▲' : ' ▼') : ''}</th>`).join('')}${cfg.actions ? '<th></th>' : ''}</tr></thead><tbody id="tb"></tbody></table></div>
         <div class="pager" id="pg"></div>`;
       $('#q', el).oninput = (e) => { q = e.target.value.toLowerCase(); page = 0; paint(); };
       el.querySelectorAll('select[data-f]').forEach((s) => (s.onchange = () => { fv[s.dataset.f] = s.value; page = 0; paint(); }));
-      el.querySelectorAll('th.sortable').forEach((th) => (th.onclick = () => { const i = +th.dataset.s; sort = sort.i === i ? { i, dir: -sort.dir } : { i, dir: 1 }; render(); }));
+      el.querySelectorAll('th.sortable').forEach((th) => { th.onclick = () => { const i = +th.dataset.s; sort = sort.i === i ? { i, dir: -sort.dir } : { i, dir: 1 }; render(); }; th.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); th.click(); } }; });
       const pop = $('#pop', el);
-      $('#gear', el).onclick = (e) => { e.stopPropagation(); pop.hidden = !pop.hidden; };
+      $('#gear', el).setAttribute('aria-haspopup', 'true'); $('#gear', el).onclick = (e) => { e.stopPropagation(); pop.hidden = !pop.hidden; };
       pop.onclick = (e) => e.stopPropagation();
       pop.querySelectorAll('[data-col]').forEach((cb) => (cb.onchange = () => {
         const l = cb.dataset.col; hidden = cb.checked ? hidden.filter((x) => x !== l) : hidden.concat(l);
@@ -305,12 +300,13 @@
       const pages = Math.max(1, Math.ceil(total / size)); if (page >= pages) page = pages - 1;
       const slice = r.slice(page * size, page * size + size);
       const tb = $('#tb', el);
-      tb.innerHTML = slice.length ? slice.map((x) => `<tr class="${cfg.onRow || canWrite ? 'click' : ''}" data-i="${rows.indexOf(x)}">${vc.map(([c]) => `<td data-label="${esc(c.label)}">${c.fmt ? c.fmt(x) : esc(x[c.k] ?? '')}</td>`).join('')}${cfg.actions ? `<td class="acts" data-label="">${cfg.actions.map((a, j) => `<button class="btn sm" data-a="${j}">${esc(a.label)}</button>`).join(' ')}</td>` : ''}</tr>`).join('') : `<tr><td colspan="${vc.length + 1}" class="empty">Nada por aqui ainda.</td></tr>`;
+      tb.innerHTML = slice.length ? slice.map((x) => `<tr class="${cfg.onRow || canWrite ? 'click' : ''}" data-i="${rows.indexOf(x)}"${cfg.onRow || canWrite ? ' tabindex="0"' : ''}>${vc.map(([c]) => `<td data-label="${esc(c.label)}">${c.fmt ? c.fmt(x) : esc(x[c.k] ?? '')}</td>`).join('')}${cfg.actions ? `<td class="acts" data-label="">${cfg.actions.map((a, j) => `<button class="btn sm" data-a="${j}">${esc(a.label)}</button>`).join(' ')}</td>` : ''}</tr>`).join('') : `<tr><td colspan="${vc.length + 1}" class="empty">Nada por aqui ainda.</td></tr>`;
       $('#pg', el).innerHTML = total > size || size !== 25 ? `<span class="small muted">${total ? page * size + 1 : 0}–${Math.min(total, page * size + size)} de ${total}</span><span class="row"><button class="btn sm" id="pp"${page ? '' : ' disabled'}>← Anterior</button><button class="btn sm" id="pn"${page < pages - 1 ? '' : ' disabled'}>Próxima →</button><select id="sz">${[10, 25, 50, 100].map((n) => `<option${n === size ? ' selected' : ''}>${n}</option>`).join('')}</select></span>` : `<span class="small muted">${total} registro(s)</span>`;
       const pp = $('#pp', el), pn = $('#pn', el), sz = $('#sz', el);
       if (pp) pp.onclick = () => { page--; paint(); };
       if (pn) pn.onclick = () => { page++; paint(); };
       if (sz) sz.onchange = () => { size = +sz.value; TJ.store.set('tj-size', size); page = 0; paint(); };
+      tb.onkeydown = (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('tr[data-i]')) { e.preventDefault(); e.target.click(); } };
       tb.onclick = (e) => {
         const tr = e.target.closest('tr[data-i]'); if (!tr) return;
         const row = rows[+tr.dataset.i], ab = e.target.closest('button[data-a]');
@@ -371,7 +367,7 @@
     if (tab === 'dados') {
       tc.innerHTML = `<div class="card">${c.summary ? TJ.md(c.summary) : '<p class="muted">Sem resumo.</p>'}
         <p class="small muted">${esc(L.kind[c.kind] || c.kind)} · aberto em ${esc(TJ.fmtDate(c.opened_at))} · ${c.is_public ? '<b>PÚBLICO no site</b>' : 'interno (não aparece no site)'}</p>
-        <div class="row">${can ? '<button class="btn gold" id="ed">Editar dados</button>' : ''}${c.is_public ? `<a class="btn" href="#/processo/${id}" target="_blank">Ver no site ↗</a>` : ''}</div></div>`;
+        <div class="row">${can ? '<button class="btn gold" id="ed">Editar dados</button>' : ''}${c.is_public ? `<a class="btn" href="#/processo/${id}" target="_blank" rel="noopener">Ver no site ↗</a>` : ''}</div></div>`;
       if (can) $('#ed', tc).onclick = () => TJ.openForm({ table: 'cases', fields: caseFields, afterSave: caseAfter }, c, () => P.processo(el, [id, 'dados']));
     } else if (tab === 'partes') {
       await TJ.crud(tc, Object.assign({ table: 'case_parties', filter: { case_id: id }, order: ['name'], newLabel: 'Nova parte',
@@ -385,7 +381,7 @@
     } else if (tab === 'provas') {
       await TJ.crud(tc, Object.assign({ table: 'evidences', filter: { case_id: id }, order: ['created_at'], newLabel: 'Nova prova',
         fields: [{ k: 'title', label: 'Título', req: true }, { k: 'kind', label: 'Tipo', type: 'select', opts: opts(L.ev) }, { k: 'url', label: 'Link da prova', upload: 'provas', help: 'Cole um link (YouTube, Imgur, Drive…) ou envie o arquivo.' }, { k: 'description', label: 'Descrição', type: 'textarea', rows: 3 }, { k: 'is_public', label: 'Mostrar no site', type: 'bool' }],
-        cols: [{ label: 'Título', k: 'title' }, { label: 'Tipo', fmt: F.map('kind', L.ev) }, { label: 'Link', fmt: (r) => (r.url ? `<a href="${esc(r.url)}" target="_blank" rel="noopener">abrir ↗</a>` : '') }, { label: 'Público', fmt: F.yn('is_public') }] }, base));
+        cols: [{ label: 'Título', k: 'title' }, { label: 'Tipo', fmt: F.map('kind', L.ev) }, { label: 'Link', fmt: (r) => (TJ.url(r.url) ? `<a href="${esc(TJ.url(r.url))}" target="_blank" rel="noopener noreferrer">abrir ↗</a>` : '') }, { label: 'Público', fmt: F.yn('is_public') }] }, base));
     } else if (tab === 'pecas') {
       await TJ.crud(tc, Object.assign(await filingsCfg(id), { filter: { case_id: id } }));
     }
@@ -420,14 +416,21 @@
     };
   }
 
-  P.pecas = async (el) => {
-    el.innerHTML = H.head('Minhas peças', 'Relatórios, alegações, rol de testemunhas e outras peças. Você só enxerga as suas' + (TJ.can('view_all_filings') ? ' (e, pelo seu cargo, as de todos)' : '') + '.') + '<div id="c"></div>';
+  async function pecasMine(el, embed) {
+    el.innerHTML = H.hd(embed)('Minhas peças', 'Relatórios, alegações, rol de testemunhas e outras peças. Você só enxerga as suas' + (TJ.can('view_all_filings') ? ' (e, pelo seu cargo, as de todos)' : '') + '.') + '<div id="c"></div>';
     await TJ.crud($('#c', el), await filingsCfg(null));
+  }
+  P.pecas = async (el, [tab]) => {
+    const T = [['minhas', 'Minhas peças', TJ.can('write_filings') || TJ.can('view_all_filings')], ['modelos', 'Modelos', TJ.can('view_internal')]].filter((t) => t[2]).map((t) => [t[0], t[1]]);
+    if (!T.length) { el.innerHTML = '<div class="card">Você não tem acesso a esta área.</div>'; return; }
+    const cur = T.some((t) => t[0] === tab) ? tab : T[0][0];
+    el.innerHTML = H.head('Peças e modelos', 'Escreva suas peças ou comece de um modelo pronto.') + H.tabs('pecas', T, cur) + '<div id="tc"></div>';
+    await (cur === 'modelos' ? pecasModelos : pecasMine)($('#tc', el), true);
   };
 
-  P.modelos = async (el) => {
+  async function pecasModelos(el, embed) {
     const can = TJ.can('manage_cases');
-    el.innerHTML = H.head('Modelos de peças', 'Textos prontos para começar uma peça rapidamente.' + (can ? '' : ' (somente leitura)')) + '<div id="c"></div>';
+    el.innerHTML = H.hd(embed)('Modelos de peças', 'Textos prontos para começar uma peça rapidamente.' + (can ? '' : ' (somente leitura)')) + '<div id="c"></div>';
     await TJ.crud($('#c', el), {
       table: 'templates', order: ['title'], newLabel: 'Novo modelo', canWrite: can, defaults: { kind: 'relatorio' },
       fields: [{ k: 'title', label: 'Título', req: true }, { k: 'kind', label: 'Tipo', type: 'select', opts: opts(L.filing) }, { k: 'content', label: 'Texto do modelo', type: 'textarea', rows: 14 }],
@@ -435,11 +438,15 @@
       actions: [{ label: 'Copiar', fn: (r) => TJ.copy(r.content || '', 'Modelo copiado.') }],
       onRow: can ? undefined : (r) => TJ.dlg(`<h3>${esc(r.title)}</h3><div class="codebox">${esc(r.content || '')}</div><p style="margin-top:16px"><button class="btn" data-close>Fechar</button></p>`),
     });
-  };
+  }
 
   // ---------- agenda ----------
-  P.agenda = async (el) => {
-    el.innerHTML = H.head('Agenda de audiências', 'Audiências, julgamentos e sessões — públicas ou internas.') + '<div id="c"></div>';
+  P.agenda = async (el, [tab = 'audiencias']) => {
+    el.innerHTML = H.head('Agenda e tarefas', 'Audiências do Tribunal e o que cada membro precisa fazer.') + H.tabs('agenda', [['audiencias', 'Audiências'], ['tarefas', 'Tarefas']], tab) + '<div id="tc"></div>';
+    await (tab === 'tarefas' ? tarefasList : agendaList)($('#tc', el), true);
+  };
+  async function agendaList(el, embed) {
+    el.innerHTML = H.hd(embed)('Agenda de audiências', 'Audiências, julgamentos e sessões — públicas ou internas.') + '<div id="c"></div>';
     await TJ.crud($('#c', el), {
       table: 'hearings', order: ['starts_at', false], newLabel: 'Nova audiência', canWrite: TJ.can('manage_agenda'),
       afterSave: async (p, row, isNew) => { if (isNew && p.is_public) await auto('hearing', { titulo: p.title, data: TJ.fmtDT(p.starts_at), local: p.place || 'a definir' }); },
@@ -448,11 +455,17 @@
       fields: [{ k: 'title', label: 'Título', req: true }, { k: 'kind', label: 'Tipo', type: 'select', opts: opts(L.hear) }, { k: 'starts_at', label: 'Data e hora', type: 'datetime', req: true }, { k: 'place', label: 'Local' }, { k: 'case_id', label: 'Processo', type: 'select', opts: () => H.casesOpts(true) }, { k: 'notes', label: 'Observações', type: 'textarea', rows: 3 }, { k: 'is_public', label: 'Mostrar no site', type: 'bool' }],
       cols: [{ label: 'Quando', fmt: F.dt('starts_at') }, { label: 'Título', k: 'title' }, { label: 'Tipo', fmt: F.map('kind', L.hear) }, { label: 'Local', k: 'place' }, { label: 'Público', fmt: F.yn('is_public') }],
     });
-  };
+  }
 
   // ---------- mural interno ----------
-  P.mural = async (el) => {
-    el.innerHTML = H.head('Mural interno', 'Avisos só para membros do Tribunal (não aparecem no site).') + '<div id="c"></div>';
+  P.avisos = async (el, [tab]) => {
+    const T = [['mural', 'Mural interno', true], ['comunicados', 'Comunicados do site', TJ.can('manage_announcements')], ['vagas', 'Vagas internas', true]].filter((t) => t[2]).map((t) => [t[0], t[1]]);
+    const cur = T.some((t) => t[0] === tab) ? tab : 'mural';
+    el.innerHTML = H.head('Avisos e vagas', 'Mural dos membros, comunicados do site e vagas abertas só para membros.') + H.tabs('avisos', T, cur) + '<div id="tc"></div>';
+    await ({ mural: muralList, comunicados: comunicadosList, vagas: (x, e) => P.vagas(x, [], e) }[cur])($('#tc', el), true);
+  };
+  async function muralList(el, embed) {
+    el.innerHTML = H.hd(embed)('Mural interno', 'Avisos só para membros do Tribunal (não aparecem no site).') + '<div id="c"></div>';
     const can = TJ.can('manage_announcements');
     await TJ.crud($('#c', el), {
       table: 'board_posts', order: ['created_at', false], newLabel: 'Novo aviso', canWrite: can, defaults: { pinned: false },
@@ -460,26 +473,26 @@
       cols: [{ label: 'Data', fmt: F.date('created_at') }, { label: 'Título', k: 'title' }, { label: 'Texto', fmt: F.cut('body', 90) }, { label: 'Fixado', fmt: F.yn('pinned') }],
       onRow: can ? undefined : (r) => TJ.dlg(`<h3>${esc(r.title)}</h3>${TJ.md(r.body)}<p style="margin-top:16px"><button class="btn" data-close>Fechar</button></p>`),
     });
-  };
+  }
 
   // ---------- comunicados + Discord ----------
   const discordText = (r) => `# ${r.title}\n${r.body || ''}`;
 
-  P.comunicados = async (el) => {
-    el.innerHTML = H.head('Comunicados', 'Escreva uma vez: publica no site, copia em markdown para o Discord ou envia direto pelo webhook.') + '<div id="c"></div>';
+  async function comunicadosList(el, embed) {
+    el.innerHTML = H.hd(embed)('Comunicados', 'Escreva uma vez: publica no site, copia em markdown para o Discord ou envia direto pelo webhook.') + '<div id="c"></div>';
     await TJ.crud($('#c', el), {
       table: 'announcements', order: ['created_at', false], newLabel: 'Novo comunicado', canWrite: TJ.can('manage_announcements'),
       afterSave: async (p, row, isNew) => { if (p.published && !p.publish_at && (isNew || !row.published)) await auto('announcement', { titulo: p.title, texto: p.body || '' }); },
       defaults: { category: 'comunicado', published: true, pinned: false },
       filters: [{ k: 'category', label: 'Categoria', opts: opts(L.cat) }],
-      fields: [{ k: 'title', label: 'Título', req: true }, { k: 'category', label: 'Categoria', type: 'select', opts: opts(L.cat) }, { k: 'body', label: 'Texto', type: 'textarea', rows: 12, help: 'Formatação: # título, **negrito**, *itálico*, __sublinhado__, -# texto pequeno, > citação, ||spoiler||. Para o Discord sem Nitro, mantenha em até 2000 caracteres.' }, { k: 'tags', label: 'Etiquetas (opcional)' }, { k: 'image_url', label: 'Imagem do comunicado (opcional)', upload: 'midia' }, { k: 'publish_at', label: 'Publicar automaticamente em (opcional)', type: 'datetime', help: 'Deixe vazio para publicar agora. Se preencher, o comunicado aparece no site sozinho na data e hora escolhidas.' }, { k: 'pinned', label: 'Fixar no topo', type: 'bool' }, { k: 'published', label: 'Publicado no site', type: 'bool' }],
+      fields: [{ k: 'title', label: 'Título', req: true }, { k: 'category', label: 'Categoria', type: 'select', opts: opts(L.cat) }, { k: 'body', label: 'Texto', type: 'textarea', rows: 12, help: 'Formatação: # título, **negrito**, *itálico*, __sublinhado__, -# texto pequeno, > citação, ||spoiler||. Para o Discord sem Nitro, mantenha em até 2000 caracteres.' }, { k: 'tags', label: 'Etiquetas (opcional)' }, { k: 'image_url', label: 'Imagem do comunicado (opcional)', upload: 'midia', help: 'Se usar imagem de outra pessoa, tenha autorização e cite o crédito no texto.' }, { k: 'publish_at', label: 'Publicar automaticamente em (opcional)', type: 'datetime', help: 'Deixe vazio para publicar agora. Se preencher, o comunicado aparece no site sozinho na data e hora escolhidas.' }, { k: 'pinned', label: 'Fixar no topo', type: 'bool' }, { k: 'published', label: 'Publicado no site', type: 'bool' }],
       cols: [{ label: 'Data', fmt: F.date('created_at') }, { label: 'Título', k: 'title' }, { label: 'Categoria', fmt: F.map('category', L.cat) }, { label: 'Agendado p/', fmt: F.dt('publish_at') }, { label: 'Caracteres', fmt: (r) => { const n = discordText(r).length; return `<span class="tag ${n > 2000 ? 'bad' : 'ok'}">${n}</span>`; } }, { label: 'Publicado', fmt: F.yn('published') }],
       actions: [
         { label: 'Copiar p/ Discord', fn: (r) => { const t = discordText(r); TJ.copy(t, t.length > 2000 ? `Copiado, mas tem ${t.length} caracteres (limite sem Nitro: 2000).` : 'Copiado em markdown!'); } },
         { label: 'Enviar ao Discord', fn: (r) => TJ.discordSend({ content: discordText(r), title: r.title }) },
       ],
     });
-  };
+  }
 
   // ---------- início (widgets configuráveis) ----------
   P.home = async (el) => {
@@ -502,11 +515,11 @@
       } },
       { id: 'tasks', title: 'Minhas tarefas', ok: c('view_internal'), r: async () => {
         const { data } = await sb().from('tasks').select('*').eq('assigned_to', state.U.id).neq('status', 'concluida').order('due_at').limit(5);
-        return `<div class="card"><h3>Minhas tarefas</h3>${(data || []).length ? data.map((x) => `<div class="item row spread"><span>${esc(x.title)}</span><span class="small muted">${x.due_at ? esc(TJ.fmtDate(x.due_at)) : ''}</span></div>`).join('') : '<p class="muted">Nenhuma tarefa pendente.</p>'}<p style="margin-bottom:0"><a href="#/painel/tarefas">Abrir tarefas →</a></p></div>`;
+        return `<div class="card"><h3>Minhas tarefas</h3>${(data || []).length ? data.map((x) => `<div class="item row spread"><span>${esc(x.title)}</span><span class="small muted">${x.due_at ? esc(TJ.fmtDate(x.due_at)) : ''}</span></div>`).join('') : '<p class="muted">Nenhuma tarefa pendente.</p>'}<p style="margin-bottom:0"><a href="#/painel/agenda/tarefas">Abrir tarefas →</a></p></div>`;
       } },
       { id: 'mural', title: 'Mural interno', ok: c('view_internal'), r: async () => {
         const { data } = await sb().from('board_posts').select('*').order('pinned', { ascending: false }).order('created_at', { ascending: false }).limit(3);
-        return `<div class="card"><h3>Mural interno</h3>${(data || []).length ? data.map((p) => `<div class="item"><b>${p.pinned ? '📌 ' : ''}${esc(p.title)}</b> <span class="small muted">${esc(TJ.fmtDate(p.created_at))}</span>${TJ.md(p.body)}</div>`).join('') : '<p class="muted">Nenhum aviso.</p>'}<p style="margin-bottom:0"><a href="#/painel/mural">Abrir mural →</a></p></div>`;
+        return `<div class="card"><h3>Mural interno</h3>${(data || []).length ? data.map((p) => `<div class="item"><b>${p.pinned ? '📌 ' : ''}${esc(p.title)}</b> <span class="small muted">${esc(TJ.fmtDate(p.created_at))}</span>${TJ.md(p.body)}</div>`).join('') : '<p class="muted">Nenhum aviso.</p>'}<p style="margin-bottom:0"><a href="#/painel/avisos/mural">Abrir mural →</a></p></div>`;
       } },
       { id: 'hearings', title: 'Próximas audiências', ok: c('view_internal'), r: async () => {
         const { data } = await sb().from('hearings').select('*').gte('starts_at', new Date().toISOString()).order('starts_at').limit(5);
@@ -524,15 +537,15 @@
         const { data } = await sb().from('applications').select('*, round:selection_rounds(title)').eq('status', 'recebida').order('created_at', { ascending: false }).limit(5);
         return `<div class="card"><h3>Candidaturas novas</h3>${(data || []).length ? data.map((x) => `<div class="item"><b>${esc(x.roblox_name)}</b> <span class="small muted">${esc(x.round?.title || '')}</span></div>`).join('') : '<p class="muted">Nenhuma candidatura nova.</p>'}<p style="margin-bottom:0"><a href="#/painel/selecao/candidatos">Ver candidatos →</a></p></div>`;
       } },
-      { id: 'tickets', title: 'Atendimento', ok: c('manage_tickets'), r: async () => {
-        const { data } = await sb().from('tickets').select('id,protocol,subject,status,priority,created_at').in('status', ['aberto', 'em_atendimento']).order('created_at').limit(60);
-        const l = (data || []).sort((a, b) => ({ urgente: 0, alta: 1, normal: 2, baixa: 3 }[a.priority] - { urgente: 0, alta: 1, normal: 2, baixa: 3 }[b.priority]) || new Date(a.created_at) - new Date(b.created_at));
-        return `<div class="card"><h3>Atendimento <span class="tag ${l.length ? 'warn' : 'ok'}">${l.length} em aberto</span></h3>${l.slice(0, 5).map((x) => `<div class="item row spread"><a href="#/painel/atendimento/ver/${x.id}"><b>${esc(x.protocol)}</b> ${esc(x.subject)}</a>${x.priority !== 'normal' ? `<span class="tag ${x.priority === 'urgente' ? 'bad' : 'warn'}">${esc(x.priority)}</span>` : ''}</div>`).join('') || '<p class="muted">Nenhum chamado em aberto.</p>'}<p style="margin-bottom:0"><a href="#/painel/atendimento/fila">Abrir fila →</a></p></div>`;
+      { id: 'docs', title: 'Biblioteca', ok: c('view_internal'), r: async () => {
+        const { data } = await sb().from('library_docs').select('id,title,category,updated_at').eq('published', true).order('updated_at', { ascending: false }).limit(5);
+        return `<div class="card"><h3>Biblioteca</h3>${(data || []).length ? data.map((x) => `<div class="item row spread"><a href="#/biblioteca/${esc(x.id)}">${esc(x.title)}</a><span class="tag">${esc(x.category)}</span></div>`).join('') : '<p class="muted">Nenhum documento ainda.</p>'}<p style="margin-bottom:0"><a href="#/painel/biblioteca">Abrir biblioteca →</a></p></div>`;
       } },
-      { id: 'mytickets', title: 'Meus chamados', ok: c('view_internal') && !c('manage_tickets'), r: async () => {
-        const { data } = await sb().from('tickets').select('id,protocol,subject,status').eq('requester_id', state.U.id).in('status', ['aberto', 'em_atendimento', 'aguardando']).limit(5);
-        return `<div class="card"><h3>Meus chamados</h3>${(data || []).map((x) => `<div class="item"><a href="#/painel/atendimento/ver/${x.id}"><b>${esc(x.protocol)}</b> ${esc(x.subject)}</a></div>`).join('') || '<p class="muted">Nenhum chamado aberto.</p>'}<p style="margin-bottom:0"><a href="#/painel/atendimento/novo">Abrir um chamado →</a></p></div>`;
+      { id: 'lgpd', title: 'Pedidos LGPD', ok: c('manage_users'), r: async () => {
+        const n = await cnt('data_requests', (q) => q.eq('status', 'aberta'));
+        return `<div class="card"><h3>Pedidos de dados (LGPD) <span class="tag ${n ? 'warn' : 'ok'}">${n} aberto(s)</span></h3><p class="muted small">Pedidos de cópia, correção ou exclusão feitos pelos membros. Prazo combinado: 15 dias.</p><p style="margin-bottom:0"><a href="#/painel/seguranca/lgpd">Abrir pedidos →</a></p></div>`;
       } },
+      { id: 'sec', title: 'Segurança', ok: c('manage_site'), r: async () => `<div class="card"><h3>Segurança</h3><p class="muted small">Rode a verificação automática e o teste "como visitante" sempre que mudar algo importante no banco ou nas permissões.</p><p style="margin-bottom:0"><a class="btn sm" href="#/painel/seguranca">Abrir Segurança →</a></p></div>` },
       { id: 'audit', title: 'Últimas alterações', ok: c('view_audit'), r: async () => {
         const { data } = await sb().from('audit_log').select('*').order('at', { ascending: false }).limit(6);
         const A = { INSERT: 'Criou', UPDATE: 'Alterou', DELETE: 'Excluiu' };
@@ -541,12 +554,12 @@
     ].filter((w) => w.ok);
 
     const off = TJ.store.get('tj-widgets-off', []);
-    el.innerHTML = H.head('Olá, ' + (state.P.display_name || state.P.roblox_name), `Cargo: <b>${esc(state.P.role?.label || state.P.role_key)}</b>`, '<button class="btn sm" id="wcfg">⚙ Personalizar painel</button>') + `<div class="quick">${[['processos', 'briefcase', 'Processos', c('view_internal')], ['pecas', 'file', 'Minhas peças', c('write_filings')], ['tarefas', 'tasks', 'Tarefas', c('view_internal')], ['comunicados', 'bell', 'Comunicados', c('manage_announcements')], ['selecao', 'check', 'Seleção', c('manage_selection')], ['discord', 'send', 'Discord', c('manage_announcements') || c('manage_site')]].filter((x) => x[3]).map(([k, ic, t]) => `<a href="#/painel/${k}">${icon(ic)}${t}</a>`).join('')}</div><div id="ws"></div>`;
+    el.innerHTML = H.head('Olá, ' + (state.P.display_name || state.P.roblox_name), `Cargo: <b>${esc(state.P.role?.label || state.P.role_key)}</b>`, '<button class="btn sm" id="wcfg">⚙ Personalizar painel</button>') + `<div class="quick">${[['processos', 'briefcase', 'Processos', c('view_internal')], ['pecas', 'file', 'Minhas peças', c('write_filings')], ['agenda', 'calendar', 'Agenda e tarefas', c('view_internal')], ['biblioteca', 'book', 'Biblioteca', c('view_internal')], ['avisos', 'bell', 'Avisos', c('view_internal')], ['selecao', 'check', 'Seleção', c('manage_selection')], ['discord', 'send', 'Discord', c('manage_announcements') || c('manage_site')]].filter((x) => x[3]).map(([k, ic, t]) => `<a href="#/painel/${k}">${icon(ic)}${t}</a>`).join('')}</div><div id="ws"></div>`;
     $('#wcfg', el).onclick = () => TJ.dlg(`<h3>Personalizar painel</h3><p class="muted small">Escolha o que aparece na sua tela inicial (vale só para você neste aparelho).</p>${W.map((w) => `<label class="chk"><input type="checkbox" data-w="${w.id}"${off.includes(w.id) ? '' : ' checked'}> ${esc(w.title)}</label>`).join('')}<p style="margin-top:16px"><button class="btn gold" id="wsave">Salvar</button> <button class="btn" data-close>Cancelar</button></p>`, (d) => {
       d.querySelector('#wsave').onclick = () => { TJ.store.set('tj-widgets-off', [...d.querySelectorAll('[data-w]')].filter((x) => !x.checked).map((x) => x.dataset.w)); d.close(); P.home(el); };
     });
     const vis = W.filter((w) => !off.includes(w.id));
-    const parts = await Promise.all(vis.map((w) => w.r().catch((e) => `<div class="card"><b>${esc(w.title)}:</b> ${esc(e.message || e)}</div>`)));
+    const parts = await Promise.all(vis.map((w) => w.r().catch((e) => `<div class="card"><b>${esc(w.title)}:</b> ${esc(TJ.friendly(e))}</div>`)));
     const full = vis.map((w, i) => (w.full ? parts[i] : '')).join(''), cards = vis.map((w, i) => (w.full ? '' : parts[i])).join('');
     $('#ws', el).innerHTML = `${full}<div class="grid g2" style="margin-top:18px;align-items:start">${cards}</div>`;
     if (!vis.length) $('#ws', el).innerHTML = '<div class="empty">Nenhum bloco ativo. Use "Personalizar painel".</div>';
@@ -557,21 +570,24 @@
     const p = state.P;
     el.innerHTML = H.head('Minha conta', `<b>${esc(p.roblox_name)}</b> — ${esc(p.role?.label || '')}`) + `<div class="grid g2" style="align-items:start">
       <form class="card" id="pf"><h3>Meu perfil</h3>
-        <div class="row">${p.avatar_url ? `<img class="avatar" src="${esc(p.avatar_url)}" alt="">` : `<span class="avatar">${esc((p.display_name || p.roblox_name || '?')[0].toUpperCase())}</span>`}<div class="grow"><label style="margin-top:0">Foto de perfil</label><input type="file" id="av" accept="image/*"></div></div>
+        <div class="row">${p.avatar_url ? `<img class="avatar" src="${esc(p.avatar_url)}" alt="">` : `<span class="avatar">${esc((p.display_name || p.roblox_name || '?')[0].toUpperCase())}</span>`}<div class="grow"><label style="margin-top:0">Foto de perfil</label><input type="file" id="av" accept="${esc(TJ.uploadAccept('avatares'))}"><div class="help">PNG, JPG ou WEBP, até 2 MB. Use uma imagem sua ou livre de direitos.</div></div></div>
         <label>Nome de exibição</label><input id="dn" value="${esc(p.display_name || '')}" maxlength="60">
         <label>Apresentação (aparece na página Equipe)</label><textarea id="bio" rows="3" maxlength="300">${esc(p.bio || '')}</textarea>
         <label class="chk"><input type="checkbox" id="sp"${p.show_public ? ' checked' : ''}> Aparecer na página Equipe do site</label>
         <p><button class="btn gold">Salvar perfil</button></p></form>
       <form class="card" id="pw"><h3>Trocar senha</h3>
-        <label>Nova senha (mínimo 8 caracteres)</label><input id="p1" type="password" minlength="8" autocomplete="new-password" required>
+        <label>Nova senha (mínimo 8 caracteres, com letras e números)</label><input id="p1" type="password" minlength="8" autocomplete="new-password" required>
         <label>Repita a nova senha</label><input id="p2" type="password" minlength="8" autocomplete="new-password" required>
-        <p><button class="btn gold">Trocar senha</button></p></form></div>`;
+        <p><button class="btn gold">Trocar senha</button></p></form>
+      <div class="card" id="lg" style="grid-column:1/-1"></div></div>`;
+    if (TJ.lgpdCard) TJ.lgpdCard($('#lg', el)); else $('#lg', el).remove();
     $('#pf', el).onsubmit = async (e) => {
       e.preventDefault();
       const patch = { display_name: $('#dn', el).value.trim() || p.roblox_name, bio: $('#bio', el).value.trim() || null, show_public: $('#sp', el).checked };
       const file = $('#av', el).files[0];
       if (file) {
-        const path = `${p.id}/${Date.now()}-${file.name.normalize('NFD').replace(/[^\w.\-]+/g, '_')}`;
+        const bad = TJ.checkFile('avatares', file); if (bad) return TJ.toast(bad, true);
+        const path = `${p.id}/${TJ.safeName(file)}`;
         const up = await sb().storage.from('avatares').upload(path, file);
         if (up.error) return TJ.toast('Falha ao enviar a foto: ' + up.error.message, true);
         patch.avatar_url = sb().storage.from('avatares').getPublicUrl(path).data.publicUrl;
@@ -583,6 +599,7 @@
     $('#pw', el).onsubmit = async (e) => {
       e.preventDefault();
       if ($('#p1', el).value !== $('#p2', el).value) return TJ.toast('As senhas não conferem.', true);
+      const weak = TJ.pwProblem($('#p1', el).value, p.roblox_name); if (weak) return TJ.toast(weak, true);
       const { error } = await sb().auth.updateUser({ password: $('#p1', el).value });
       TJ.toast(error ? error.message : 'Senha alterada!', !!error);
       if (!error) e.target.reset();
@@ -590,8 +607,8 @@
   };
 
   // ---------- auditoria ----------
-  P.auditoria = async (el) => {
-    el.innerHTML = H.head('Histórico de alterações', 'Quem criou, alterou ou excluiu cada coisa. Toque em uma linha para ver os dados.') + '<div id="c"></div>';
+  P.auditoria = async (el, args, embed) => {
+    el.innerHTML = H.hd(embed)('Histórico de alterações', 'Quem criou, alterou ou excluiu cada coisa. Toque em uma linha para ver os dados.') + '<div id="c"></div>';
     const { data: pf } = await sb().from('profiles').select('id,roblox_name');
     const map = Object.fromEntries((pf || []).map((x) => [x.id, x.roblox_name]));
     const A = { INSERT: 'Criou', UPDATE: 'Alterou', DELETE: 'Excluiu' };
@@ -602,10 +619,10 @@
   };
 
   // ---------- tarefas ----------
-  P.tarefas = async (el) => {
+  async function tarefasList(el, embed) {
     const { data: ppl } = await sb().from('profiles').select('id,roblox_name').eq('active', true).order('roblox_name');
     const T = { aberta: ['Aberta', 'warn'], em_andamento: ['Em andamento', 'warn'], concluida: ['Concluída', 'ok'] };
-    el.innerHTML = H.head('Tarefas', 'Combine e acompanhe o que cada membro precisa fazer, com prazo e processo ligado.') + '<div id="c"></div>';
+    el.innerHTML = H.hd(embed)('Tarefas', 'Combine e acompanhe o que cada membro precisa fazer, com prazo e processo ligado.') + '<div id="c"></div>';
     const mine = TJ.can('manage_cases') ? [] : [];
     await TJ.crud($('#c', el), {
       table: 'tasks', select: '*, assignee:profiles!assigned_to(roblox_name), kase:cases(number)', order: ['due_at'], newLabel: 'Nova tarefa', canWrite: true,
@@ -618,7 +635,7 @@
       cols: [{ label: 'Tarefa', k: 'title' }, { label: 'Responsável', fmt: (r) => esc(r.assignee?.roblox_name || '—') }, { label: 'Prazo', fmt: (r) => (r.due_at ? `<span class="${new Date(r.due_at) < new Date() && r.status !== 'concluida' ? 'tag bad' : ''}">${esc(TJ.fmtDT(r.due_at))}</span>` : '—') }, { label: 'Processo', fmt: (r) => esc(r.kase?.number || '') }, { label: 'Situação', fmt: (r) => TJ.tag(T, r.status) }],
       actions: [{ label: 'Concluir', fn: async (r, reload) => { const u = await sb().from('tasks').update({ status: 'concluida' }).eq('id', r.id); TJ.toast(u.error ? u.error.message : 'Tarefa concluída.', !!u.error); reload(); } }],
     });
-  };
+  }
 
   // ---------- busca geral ----------
   P.busca = async (el, [term = '']) => {
@@ -637,76 +654,83 @@
     const sec = (t, arr, fn) => (arr && arr.length ? `<div class="card" style="margin-bottom:14px"><h3>${t}</h3>${arr.map((x) => `<div class="item">${fn(x)}</div>`).join('')}</div>` : '');
     const html = sec('Processos', cs.data, (x) => `<a href="#/painel/processos/${x.id}"><b>${esc(x.number)}</b> ${esc(x.title)}</a> ${TJ.tag(L.status, x.status)}`) +
       sec('Membros', pf.data, (x) => `<a href="#/painel/usuarios/${x.active ? 'membros' : 'desligados'}"><b>@${esc(x.roblox_name)}</b> ${esc(x.display_name || '')}</a> ${x.active ? '' : '<span class="tag bad">desligado</span>'}`) +
-      sec('Comunicados', an.data, (x) => `<a href="#/painel/comunicados">${esc(x.title)}</a> <span class="small muted">${esc(TJ.fmtDate(x.created_at))}</span>`) +
+      sec('Comunicados', an.data, (x) => `<a href="#/painel/avisos/comunicados">${esc(x.title)}</a> <span class="small muted">${esc(TJ.fmtDate(x.created_at))}</span>`) +
       sec('Candidatos', ap.data, (x) => `<a href="#/painel/selecao/candidatos"><b>${esc(x.roblox_name)}</b></a> <span class="tag ${L.appTone[x.status] || ''}">${esc(L.app[x.status] || x.status)}</span>`) +
       sec('Peças', fl.data, (x) => `<a href="#/painel/pecas">${esc(x.title)}</a> <span class="tag gray">${esc(x.status)}</span>`);
     $('#r', el).innerHTML = html || '<div class="empty">Nada encontrado.</div>';
   };
 
-  // ---------- moldura do painel (menu lateral no PC, barra inferior no celular) ----------
+  // ---------- moldura do painel (menu lateral no PC, barra inferior + folha de menu no celular) ----------
+  // 12 itens no máximo. As telas antigas viraram abas: mural/comunicados/vagas → Avisos; modelos → Peças; tarefas → Agenda; histórico → Segurança.
+  const FAV_DEFAULT = ['', 'processos', 'pecas', 'agenda'];
+  const ALIAS = { modelos: 'pecas/modelos', tarefas: 'agenda/tarefas', mural: 'avisos/mural', comunicados: 'avisos/comunicados', vagas: 'avisos/vagas', auditoria: 'seguranca/historico', atendimento: '' };
   const MENU = () => {
     const c = TJ.can;
     return [
-      ['', 'Início', 'home', true, 'Trabalho', true],
-      ['processos', 'Processos', 'briefcase', c('view_internal'), 'Trabalho'],
-      ['pecas', 'Minhas peças', 'file', c('write_filings') || c('view_all_filings'), 'Trabalho'],
-      ['modelos', 'Modelos de peças', 'copy', c('view_internal'), 'Trabalho'],
-      ['tarefas', 'Tarefas', 'tasks', c('view_internal'), 'Trabalho'],
-      ['atendimento', 'Atendimento', 'headset', c('view_internal'), 'Trabalho'],
-      ['agenda', 'Agenda', 'calendar', c('view_internal'), 'Trabalho'],
-      ['mural', 'Mural interno', 'pin', c('view_internal'), 'Trabalho'],
-      ['vagas', 'Vagas internas', 'clip', c('view_internal'), 'Trabalho'],
-      ['comunicados', 'Comunicados', 'bell', c('manage_announcements'), 'Gestão'],
-      ['discord', 'Discord', 'send', c('manage_announcements') || c('manage_site'), 'Gestão'],
-      ['selecao', 'Seleção', 'check', c('manage_selection'), 'Gestão'],
-      ['usuarios', 'Membros e cargos', 'users', c('manage_users'), 'Gestão'],
-      ['site', 'Site e aparência', 'sliders', c('manage_site'), 'Gestão'],
-      ['auditoria', 'Histórico', 'clock', c('view_audit'), 'Gestão'],
-      ['conta', 'Minha conta', 'user', true, 'Conta', true],
-    ].filter((m) => m[3]).map(([k, t, ic, , g, fixed]) => ({ k, t, ic, g, fixed: !!fixed }));
+      { k: '', t: 'Início', s: 'Início', ic: 'home', ok: true, g: 'Trabalho', fixed: true },
+      { k: 'processos', t: 'Processos', s: 'Processos', ic: 'briefcase', ok: c('view_internal'), g: 'Trabalho' },
+      { k: 'pecas', t: 'Peças e modelos', s: 'Peças', ic: 'file', ok: c('write_filings') || c('view_all_filings') || c('view_internal'), g: 'Trabalho' },
+      { k: 'agenda', t: 'Agenda e tarefas', s: 'Agenda', ic: 'calendar', ok: c('view_internal'), g: 'Trabalho' },
+      { k: 'avisos', t: 'Avisos e vagas', s: 'Avisos', ic: 'bell', ok: c('view_internal'), g: 'Trabalho' },
+      { k: 'biblioteca', t: 'Biblioteca', s: 'Biblioteca', ic: 'book', ok: c('view_internal') || c('manage_library'), g: 'Trabalho' },
+      { k: 'selecao', t: 'Seleção', s: 'Seleção', ic: 'check', ok: c('manage_selection'), g: 'Gestão' },
+      { k: 'discord', t: 'Discord', s: 'Discord', ic: 'send', ok: c('manage_announcements') || c('manage_site'), g: 'Gestão' },
+      { k: 'usuarios', t: 'Membros e cargos', s: 'Membros', ic: 'users', ok: c('manage_users'), g: 'Gestão' },
+      { k: 'site', t: 'Site e aparência', s: 'Site', ic: 'sliders', ok: c('manage_site'), g: 'Gestão' },
+      { k: 'seguranca', t: 'Segurança e LGPD', s: 'Segurança', ic: 'shield', ok: c('manage_site') || c('view_audit') || c('manage_users'), g: 'Gestão' },
+      { k: 'conta', t: 'Minha conta', s: 'Conta', ic: 'user', ok: true, g: 'Conta', fixed: true },
+    ].filter((m) => m.ok);
   };
   TJ.menuDialog = (done) => {
-    const all = MENU(), hid = TJ.store.get('tj-menu-hidden', []), fav = TJ.store.get('tj-menu-fav', ['', 'processos', 'pecas', 'agenda']);
-    TJ.dlg(`<h3>Personalizar menu</h3><p class="muted small">Escolha o que aparece no seu menu. Use a estrela para fixar até 4 atalhos na barra de baixo (celular).</p>
-      ${all.map((m) => `<div class="row spread item"><label class="chk" style="margin:0"><input type="checkbox" data-v="${esc(m.k)}"${hid.includes(m.k) ? '' : ' checked'}${m.fixed ? ' disabled' : ''}> ${esc(m.t)}</label><label class="chk" style="margin:0" title="Fixar na barra de baixo"><input type="checkbox" data-f="${esc(m.k)}"${fav.includes(m.k) ? ' checked' : ''}> ★</label></div>`).join('')}
+    const all = MENU(), hid = TJ.store.get('tj-menu-hidden', []), fav = TJ.store.get('tj-menu-fav', FAV_DEFAULT);
+    TJ.dlg(`<h3>Personalizar menu</h3><p class="muted small">Escolha o que aparece no seu menu. Marque a estrela para fixar até 4 atalhos na barra de baixo (celular).</p>
+      ${all.map((m) => `<div class="row spread item"><label class="chk" style="margin:0"><input type="checkbox" data-v="${esc(m.k)}"${hid.includes(m.k) ? '' : ' checked'}${m.fixed ? ' disabled' : ''}> ${esc(m.t)}</label><label class="chk" style="margin:0" title="Fixar na barra de baixo"><input type="checkbox" data-f="${esc(m.k)}"${fav.includes(m.k) ? ' checked' : ''} aria-label="Fixar ${esc(m.t)} na barra de baixo"> ★</label></div>`).join('')}
       <p style="margin-top:16px" class="row"><button class="btn gold" id="mdsave">Salvar</button><button class="btn" id="mdreset">Restaurar padrão</button><button class="btn" data-close>Cancelar</button></p>`, (d) => {
       d.querySelector('#mdsave').onclick = () => {
         const hidden = [...d.querySelectorAll('[data-v]')].filter((x) => !x.checked).map((x) => x.dataset.v);
         const favs = [...d.querySelectorAll('[data-f]:checked')].map((x) => x.dataset.f).slice(0, 4);
         TJ.store.set('tj-menu-hidden', hidden); TJ.store.set('tj-menu-fav', favs); d.close(); done && done();
       };
-      d.querySelector('#mdreset').onclick = () => { TJ.store.set('tj-menu-hidden', []); TJ.store.set('tj-menu-fav', ['', 'processos', 'pecas', 'agenda']); d.close(); done && done(); };
+      d.querySelector('#mdreset').onclick = () => { TJ.store.del ? (TJ.store.del('tj-menu-hidden'), TJ.store.del('tj-menu-fav')) : (TJ.store.set('tj-menu-hidden', []), TJ.store.set('tj-menu-fav', FAV_DEFAULT)); d.close(); done && done(); };
     });
   };
 
   TJ.mountPanel = async function (view, parts) {
     const page = parts[0] || 'home';
+    if (Object.prototype.hasOwnProperty.call(ALIAS, page)) { location.replace('#/painel' + (ALIAS[page] ? '/' + ALIAS[page] : '')); return; }
     const all = MENU(), hid = TJ.store.get('tj-menu-hidden', []);
     const vis = all.filter((m) => m.fixed || !hid.includes(m.k));
-    let favKeys = TJ.store.get('tj-menu-fav', ['', 'processos', 'pecas', 'agenda']);
-    let fav = favKeys.map((k) => vis.find((m) => m.k === k)).filter(Boolean).slice(0, 4);
+    const favKeys = TJ.store.get('tj-menu-fav', FAV_DEFAULT);
+    const fav = favKeys.map((k) => vis.find((m) => m.k === k)).filter(Boolean).slice(0, 4);
     if (fav.length < 4) vis.forEach((m) => { if (fav.length < 4 && !fav.includes(m) && m.k !== 'conta') fav.push(m); });
     const cur = page === 'home' ? '' : page;
     const href = (k) => `#/painel${k ? '/' + k : ''}`;
-    const ini = (state.P.display_name || state.P.roblox_name || '?')[0].toUpperCase();
-    const av = state.P.avatar_url ? `<img class="avatar" src="${esc(state.P.avatar_url)}" alt="">` : `<span class="avatar">${esc(ini)}</span>`;
-    let groups = ''; let last = '';
-    vis.forEach((m) => { if (m.g !== last) { groups += `<h5>${esc(m.g)}</h5>`; last = m.g; } groups += `<a class="mi${cur === m.k ? ' on' : ''}" href="${href(m.k)}">${icon(m.ic)}${esc(m.t)}</a>`; });
+    const name = state.P.display_name || state.P.roblox_name || '?';
+    const ini = name[0].toUpperCase();
+    const avUrl = TJ.url(state.P.avatar_url);
+    const av = avUrl ? `<img class="avatar" src="${esc(avUrl)}" alt="">` : `<span class="avatar" aria-hidden="true">${esc(ini)}</span>`;
+    const groupsOf = () => { const g = []; vis.forEach((m) => { let x = g.find((y) => y[0] === m.g); if (!x) g.push((x = [m.g, []])); x[1].push(m); }); return g; };
+    const side = groupsOf().map(([g, list]) => `<h5>${esc(g)}</h5>${list.map((m) => `<a class="mi${cur === m.k ? ' on' : ''}" href="${href(m.k)}"${cur === m.k ? ' aria-current="page"' : ''}>${icon(m.ic)}${esc(m.t)}</a>`).join('')}`).join('');
     const inFav = fav.some((m) => m.k === cur);
-    view.innerHTML = `<div class="panel"><aside class="side"><div class="me">${av}<div><b>${esc(state.P.display_name || state.P.roblox_name)}</b><div class="small muted">${esc(state.P.role?.label || '')}</div></div></div>${groups}<button class="btn sm gearbtn" id="mcfg">⚙ Personalizar menu</button></aside>
-      <section class="content"><form class="ptop" id="sf"><input type="search" id="sq" placeholder="Buscar processos, membros, comunicados…" aria-label="Buscar"></form><div id="pc"></div></section></div>
-      <nav class="tabbar" aria-label="Menu">${fav.map((m) => `<a href="${href(m.k)}" class="${cur === m.k ? 'on' : ''}">${icon(m.ic)}<span>${esc(m.t.split(' ')[0])}</span></a>`).join('')}<button id="tbmore" class="${!inFav && cur ? 'on' : ''}">${icon('menu')}<span>Menu</span></button></nav>`;
-    $('#sf', view).onsubmit = (e) => { e.preventDefault(); const t = $('#sq', view).value.trim(); if (t) location.hash = '#/painel/busca/' + encodeURIComponent(t); };
+    view.innerHTML = `<div class="panel"><aside class="side" aria-label="Menu do painel"><div class="me">${av}<div><b>${esc(name)}</b><div class="small muted">${esc(state.P.role?.label || '')}</div></div></div>${side}<button class="btn sm gearbtn" id="mcfg">⚙ Personalizar menu</button></aside>
+      <section class="content"><form class="ptop" id="psf" role="search"><input type="search" id="sq" placeholder="Buscar no painel…" aria-label="Buscar no painel"></form><div id="pc"></div></section></div>
+      <nav class="tabbar" aria-label="Menu principal">${fav.map((m) => `<a href="${href(m.k)}" class="${cur === m.k ? 'on' : ''}"${cur === m.k ? ' aria-current="page"' : ''}>${icon(m.ic)}<span>${esc(m.s || m.t)}</span></a>`).join('')}<button type="button" id="tbmore" class="${!inFav && cur ? 'on' : ''}" aria-haspopup="dialog">${icon('menu')}<span>Menu</span></button></nav>`;
+    const goSearch = (e, input) => { e.preventDefault(); const t = input.value.trim(); if (t) location.hash = '#/painel/busca/' + encodeURIComponent(t); };
+    $('#psf', view).onsubmit = (e) => goSearch(e, $('#sq', view));
     $('#mcfg', view).onclick = () => TJ.menuDialog(() => TJ.route());
-    $('#tbmore', view).onclick = () => TJ.dlg(`<h3>Menu</h3><div class="tiles">${vis.map((m) => `<a class="tile${cur === m.k ? ' on' : ''}" href="${href(m.k)}" data-close>${icon(m.ic)}${esc(m.t)}</a>`).join('')}<a class="tile" href="#/" data-close>${icon('home')}Ver o site</a><a class="tile" href="#/sair" data-close>${icon('out')}Sair</a></div>
-      <p class="row" style="margin-top:14px"><button class="btn sm" id="mm1">⚙ Personalizar menu</button><button class="btn sm" id="mm2">◐ Tema claro/escuro</button><button class="btn sm" data-close>Fechar</button></p>`, (d) => {
-      d.querySelectorAll('a.tile').forEach((a) => a.addEventListener('click', () => d.close()));
+    $('#tbmore', view).onclick = () => TJ.dlg(`<div class="msheet">
+      <div class="msheet-head">${av}<div class="grow"><b>${esc(name)}</b><span class="small muted">${esc(state.P.role?.label || '')}</span></div><button type="button" class="btn sm" data-close aria-label="Fechar menu">${icon('x')}</button></div>
+      <form id="msf" role="search"><input type="search" id="msq" placeholder="Buscar no painel…" aria-label="Buscar no painel"></form>
+      ${groupsOf().map(([g, list]) => `<h5>${esc(g)}</h5><div class="tiles">${list.map((m) => `<a class="tile${cur === m.k ? ' on' : ''}" href="${href(m.k)}"${cur === m.k ? ' aria-current="page"' : ''}><span class="ti">${icon(m.ic)}</span>${esc(m.s || m.t)}</a>`).join('')}</div>`).join('')}
+      <div class="msheet-foot"><button type="button" class="btn sm" id="mm1">⚙ Personalizar</button><button type="button" class="btn sm" id="mm2">${icon('moon')} Tema</button><a class="btn sm" href="#/">${icon('eye')} Ver o site</a><a class="btn sm" href="#/sair">${icon('out')} Sair</a></div></div>`, (d) => {
+      d.querySelectorAll('a').forEach((a) => a.addEventListener('click', () => d.close()));
+      d.querySelector('#msf').onsubmit = (e) => { goSearch(e, d.querySelector('#msq')); d.close(); };
       d.querySelector('#mm1').onclick = () => { d.close(); TJ.menuDialog(() => TJ.route()); };
-      d.querySelector('#mm2').onclick = () => { const t = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; document.documentElement.dataset.theme = t; TJ.store.set('tj-theme', t); };
+      d.querySelector('#mm2').onclick = () => { TJ.toggleTheme ? TJ.toggleTheme() : (document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); };
     });
     const el = $('#pc', view), fn = page === 'home' ? P.home : P[page];
     const allowed = page === 'busca' || all.some((m) => m.k === cur);
     if (!fn || !allowed) { el.innerHTML = '<div class="card">Você não tem acesso a esta área.</div>'; return; }
-    try { await fn(el, parts.slice(1)); } catch (e) { console.error(e); el.innerHTML = `<div class="card"><b>Erro:</b> ${esc(e.message || e)}</div>`; }
+    try { await fn(el, parts.slice(1)); } catch (e) { console.error(e); el.innerHTML = `<div class="card"><b>Não foi possível abrir esta área.</b><p class="muted small">${esc(TJ.friendly ? TJ.friendly(e) : 'Tente novamente.')}</p></div>`; }
   };
 })();

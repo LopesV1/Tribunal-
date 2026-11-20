@@ -76,7 +76,7 @@
         { k: 'role_key', label: 'Cargo da vaga', type: 'select', opts: async () => [['', '—']].concat(await H.rolesOpts()) },
         { k: 'status', label: 'Situação', type: 'select', opts: opts(L.round) },
         { k: 'closes_at', label: 'Inscrições até', type: 'datetime', help: 'Depois dessa data e hora, as inscrições se fecham sozinhas.' },
-        { k: 'banner_url', label: 'Imagem de banner da vaga (opcional)', upload: 'midia' },
+        { k: 'banner_url', label: 'Imagem de banner da vaga (opcional)', upload: 'midia', help: 'Use imagem sua ou livre de direitos. Não coloque fotos de terceiros sem autorização.' },
         { k: 'description', label: 'Descrição', type: 'textarea' },
         { k: 'requirements', label: 'Requisitos', type: 'textarea', rows: 4 },
         { k: 'form_fields', label: 'Formulário de inscrição', type: 'formbuilder', help: 'Nome do Roblox e Discord já vêm no formulário. Monte aqui as demais perguntas. Se deixar vazio, usa o formulário padrão (experiência e motivação).' },
@@ -175,8 +175,9 @@
       const { data } = await sb().from('applications').select('*').eq('round_id', rid()).not('interview_at', 'is', null).order('interview_at');
       const rows = (data || []).filter((a) => a.status !== 'reprovada'); load.rows = rows;
       let h = '', last = '';
-      rows.forEach((a) => { const k = dayKey(a.interview_at); if (k !== last) { h += `<div class="agday">${esc(dayLong(a.interview_at))}</div>`; last = k; } h += `<div class="slot" data-id="${a.id}" style="cursor:pointer"><time>${esc(hhmm(a.interview_at))}</time><div class="grow"><b>${esc(a.roblox_name)}</b><div class="small muted">${a.interview_place ? esc(a.interview_place) : 'sem local'}${a.interview_by ? ' · ' + esc(a.interview_by) : ''}</div></div><span class="tag ${L.appTone[a.status] || ''}">${esc(L.app[a.status] || a.status)}</span></div>`; });
+      rows.forEach((a) => { const k = dayKey(a.interview_at); if (k !== last) { h += `<div class="agday">${esc(dayLong(a.interview_at))}</div>`; last = k; } h += `<div class="slot" data-id="${a.id}"${can ? ' tabindex="0" role="button"' : ''} style="${can ? 'cursor:pointer' : ''}"><time>${esc(hhmm(a.interview_at))}</time><div class="grow"><b>${esc(a.roblox_name)}</b><div class="small muted">${a.interview_place ? esc(a.interview_place) : 'sem local'}${a.interview_by ? ' · ' + esc(a.interview_by) : ''}</div></div><span class="tag ${L.appTone[a.status] || ''}">${esc(L.app[a.status] || a.status)}</span></div>`; });
       $('#ag', tc).innerHTML = h || '<p class="muted">Nenhuma entrevista marcada nesta vaga.</p>';
+      $('#ag', tc).querySelectorAll('.slot').forEach((s) => (s.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); s.click(); } }));
       $('#ag', tc).querySelectorAll('.slot').forEach((s) => (s.onclick = () => { if (!can) return; const row = rows.find((x) => x.id === s.dataset.id); TJ.openForm({ table: 'applications', editLabel: 'Entrevista', canDelete: false,
         fields: [{ k: 'interview_at', label: 'Data e hora', type: 'datetime' }, { k: 'interview_place', label: 'Local / canal' }, { k: 'interview_by', label: 'Entrevistador(a)' }, { k: 'status', label: 'Situação', type: 'select', opts: opts(L.app) }],
         header: (r) => `<p><b>@${esc(r.roblox_name)}</b></p>` }, row, load); }));
@@ -403,18 +404,18 @@
   // =====================================================================
   // VAGAS INTERNAS (qualquer membro se candidata pelo painel)
   // =====================================================================
-  P.vagas = async (el) => {
+  P.vagas = async (el, args, embed) => {
     const [r, mine] = await Promise.all([
       sb().from('selection_rounds').select('*').eq('audience', 'interno').order('created_at', { ascending: false }),
       sb().from('my_applications').select('*').order('created_at', { ascending: false }),
     ]);
     if (r.error) throw r.error;
     const rounds = r.data || [], done = new Set((mine.data || []).map((a) => a.round_id));
-    el.innerHTML = H.head('Vagas internas', 'Oportunidades abertas só para membros (promoções, novas funções…).') +
+    el.innerHTML = H.hd(embed)('Vagas internas', 'Oportunidades abertas só para membros (promoções, novas funções…).') +
       (rounds.length ? rounds.map((x) => {
         const expired = x.closes_at && new Date(x.closes_at) <= new Date();
         const open = x.status === 'aberto' && !expired && !done.has(x.id), ff = Array.isArray(x.form_fields) ? x.form_fields : [];
-        return `<div class="card" style="margin-bottom:18px">${x.banner_url ? `<img class="cover" src="${esc(x.banner_url)}" alt="" loading="lazy">` : ''}<div class="row spread"><h3 style="margin:0">${esc(x.title)}</h3>${expired && x.status === 'aberto' ? '<span class="tag gray">Inscrições encerradas</span>' : TJ.tag(L.round, x.status)}</div>
+        return `<div class="card" style="margin-bottom:18px">${TJ.url(x.banner_url) ? `<img class="cover" src="${esc(TJ.url(x.banner_url))}" alt="" loading="lazy">` : ''}<div class="row spread"><h3 style="margin:0">${esc(x.title)}</h3>${expired && x.status === 'aberto' ? '<span class="tag gray">Inscrições encerradas</span>' : TJ.tag(L.round, x.status)}</div>
           ${x.closes_at ? `<p class="small muted">Inscrições até ${esc(TJ.fmtDT(x.closes_at))}</p>` : ''}${x.description ? TJ.md(x.description) : ''}${x.requirements ? '<h4>Requisitos</h4>' + TJ.md(x.requirements) : ''}
           ${done.has(x.id) ? '<p><span class="tag ok">Você já se candidatou</span></p>' : open ? `<details><summary class="btn gold">Candidatar-me</summary><form class="iapply" data-round="${x.id}" style="margin-top:12px">${ff.length ? TJ.formFieldsHTML(ff) : '<label>Por que você quer esta vaga?</label><textarea id="ff_motiv" maxlength="1500"></textarea>'}<p><button class="btn blue">Enviar candidatura</button></p></form></details>` : ''}</div>`;
       }).join('') : '<div class="empty">Nenhuma vaga interna no momento.</div>') +
@@ -425,8 +426,8 @@
       const p = { round_id: round.id, roblox_name: state.P.roblox_name, applicant_id: state.U.id };
       if (ff.length) p.answers = TJ.readFormAnswers(f, ff); else p.motivation = (f.querySelector('#ff_motiv').value || '').trim() || null;
       const { error } = await sb().from('applications').insert(p);
-      if (error) return TJ.toast('Não foi possível enviar: ' + error.message, true);
-      TJ.toast('Candidatura enviada!'); P.vagas(el);
+      if (error) return TJ.toast(error, true);
+      TJ.toast('Candidatura enviada!'); P.vagas(el, args, embed);
     }));
   };
 })();
